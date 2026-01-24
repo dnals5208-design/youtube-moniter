@@ -1,4 +1,5 @@
 pandas
 openpyxl
 playwright
-DrissionPage
+Appium-Python-Client
+selenium
