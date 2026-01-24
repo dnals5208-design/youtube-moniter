@@ -1,8 +1,8 @@
-name: 유튜브 광고 모니터링
+name: 유튜브 광고 모니터링 (PC+BrowserStack)
 
 on:
   schedule:
-    # 한국 시간 오후 3시 실행 (= UTC 오전 6시)
+    # 매일 한국 시간 오후 3시 (UTC 06:00)
     - cron: '0 6 * * *'
   workflow_dispatch: # 수동 실행 버튼
 
@@ -10,14 +10,24 @@ jobs:
   run-monitor:
     runs-on: ubuntu-latest
     
+    # 타임존 한국 설정
+    env:
+      TZ: 'Asia/Seoul'
+
     steps:
-    - name: 내 코드 가져오기
+    - name: 코드 가져오기
       uses: actions/checkout@v3
 
-    - name: 파이썬 설치
+    - name: 파이썬 설정
       uses: actions/setup-python@v4
       with:
         python-version: '3.9'
+
+    # ★ 가상 모니터 설치 (PC headless=False 위해 필수)
+    - name: 가상 모니터(Xvfb) 설치
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y xvfb
 
     - name: 라이브러리 설치
       run: |
@@ -25,10 +35,14 @@ jobs:
         playwright install chromium
         playwright install-deps
 
+    # ★ 파이썬 실행 (비밀번호 전달 + 가상모니터 사용)
     - name: 모니터링 실행
-      run: python main.py
+      env:
+        BROWSERSTACK_USER: ${{ secrets.BROWSERSTACK_USER }}
+        BROWSERSTACK_KEY: ${{ secrets.BROWSERSTACK_KEY }}
+      run: xvfb-run --auto-servernum --server-args="-screen 0 1280x960x24" python main.py
 
-    - name: 결과 엑셀파일 다운로드 업로드
+    - name: 결과 엑셀 다운로드
       if: always()
       uses: actions/upload-artifact@v4
       with:
