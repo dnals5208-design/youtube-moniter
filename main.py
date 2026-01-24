@@ -19,16 +19,18 @@ KEYWORDS = [
 ]
 
 TARGET_SUCCESS_COUNT = 10 
+# MO는 리얼 기기라 느리므로 키워드당 3~5개만 수집해도 충분함
+TARGET_MO_SUCCESS_COUNT = 5
 MAX_FAILURE_LIMIT = 30
 WAIT_TIME = 2.0
 
-# [설정] BrowserStack 인증 (GitHub Secrets에서 가져옴)
+# GitHub Secrets에서 가져옴
 BS_USER = os.environ.get("BROWSERSTACK_USER")
 BS_KEY = os.environ.get("BROWSERSTACK_KEY")
 BS_URL = f"https://{BS_USER}:{BS_KEY}@hub-cloud.browserstack.com/wd/hub"
 
 # ==========================================
-# [함수] 광고주 분류
+# [함수] 광고주 분류 (이미지 2번처럼 깔끔하게)
 # ==========================================
 def classify_advertiser(text):
     text = text.replace(" ", "")
@@ -45,23 +47,25 @@ def classify_advertiser(text):
     return "해커스(기타)", "해커스"
 
 # ==========================================
-# [1단계] PC 모니터링 (가상 모니터 + Playwright)
+# [1단계] PC 모니터링 (한국 위치 강제 주입)
 # ==========================================
 def run_pc_crawling():
     results = []
-    print("\n🖥️ [PC] 모니터링 시작 (Playwright)...")
+    print("\n🖥️ [PC] 모니터링 시작 (한국 위치 주입)...")
     
     with sync_playwright() as p:
-        # 가상 모니터(Xvfb) 덕분에 headless=False 가능!
         browser = p.chromium.launch(
             headless=False,
             args=["--disable-blink-features=AutomationControlled"]
         )
+        # ★ [핵심] 한국 서울 좌표와 언어 설정을 강제로 박아넣음
         context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             viewport={"width": 1920, "height": 1080},
             locale="ko-KR",
-            timezone_id="Asia/Seoul"
+            timezone_id="Asia/Seoul",
+            geolocation={"latitude": 37.5665, "longitude": 126.9780}, # 서울 시청 좌표
+            permissions=["geolocation"]
         )
         context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
@@ -76,7 +80,7 @@ def run_pc_crawling():
                     remaining = TARGET_SUCCESS_COUNT - success
                     for _ in range(remaining):
                         success += 1
-                        results.append({"디바이스": "PC", "회차": success, "키워드": keyword, "광고여부": "X", "광고주_구분": "미노출(시도초과)", "상세_광고주": "-", "광고형태": "-", "영상제목/배너카피": "-"})
+                        results.append({"디바이스": "PC", "회차": success, "키워드": keyword, "광고여부": "X", "광고주_구분": "-", "상세_광고주": "-", "광고형태": "-", "제목/배너카피": "-"})
                     break
                 try:
                     page.goto(f"https://www.youtube.com/results?search_query={keyword}", wait_until="domcontentloaded")
@@ -86,7 +90,7 @@ def run_pc_crawling():
                     ads = page.locator("ytd-promoted-sparkles-web-renderer, ytd-ad-slot-renderer, ytd-video-renderer").all()
                     for ad in ads:
                         txt = ad.inner_text()
-                        if ("광고" in txt or "Ad" in txt or "Sponsored" in txt or "스폰서" in txt):
+                        if ("광고" in txt or "Ad" in txt or "Sponsored" in txt or "스폰서" in txt) and len(txt) > 5:
                             found_ad = ad; break
                     
                     if found_ad:
@@ -94,17 +98,19 @@ def run_pc_crawling():
                         title = raw[1] if len(raw) > 1 else raw[0]
                         advertiser = "알수없음"
                         for r in raw:
-                            if len(r) < 40 and "http" not in r and r != title and "광고" not in r: 
+                            if len(r) < 40 and "http" not in r and r != title and "광고" not in r and "조회수" not in r: 
                                 advertiser = r; break
                         
                         biz, comp = classify_advertiser(advertiser + " " + title)
                         is_video = "조회수" in found_ad.inner_text()
-                        results.append({"디바이스": "PC", "회차": success+1, "키워드": keyword, "광고여부": "O", "광고주_구분": comp, "상세_광고주": biz, "광고형태": "영상" if is_video else "배너", "영상제목/배너카피": title})
+                        
+                        # 외국 광고 필터링 (선택사항: 한글 없으면 제외하려면 로직 추가 가능)
+                        results.append({"디바이스": "PC", "회차": success+1, "키워드": keyword, "광고여부": "O", "광고주_구분": comp, "상세_광고주": biz, "광고형태": "영상" if is_video else "배너", "제목/배너카피": title})
                         success += 1
-                        print(f"   [PC] ⭕ {biz}")
+                        print(f"   [PC] ⭕ {biz} / {title[:15]}...")
                     else:
                         if keyword == "공무원":
-                             results.append({"디바이스": "PC", "회차": success+1, "키워드": keyword, "광고여부": "X", "광고주_구분": "-", "상세_광고주": "-", "광고형태": "-", "영상제목/배너카피": "-"})
+                             results.append({"디바이스": "PC", "회차": success+1, "키워드": keyword, "광고여부": "X", "광고주_구분": "-", "상세_광고주": "-", "광고형태": "-", "제목/배너카피": "-"})
                              success += 1
                         else: fails += 1
                 except: fails += 1
@@ -112,15 +118,15 @@ def run_pc_crawling():
     return results
 
 # ==========================================
-# [2단계] MO 모니터링 (BrowserStack - Real App)
+# [2단계] MO 모니터링 (BrowserStack - 진짜 한국 앱 환경)
 # ==========================================
 def run_real_app_crawling():
     if not BS_USER or not BS_KEY:
-        print("⚠️ BrowserStack 계정 정보가 없습니다. (Secrets 확인 필요)")
+        print("⚠️ BrowserStack 계정 정보 없음.")
         return []
 
     results = []
-    print("\n📱 [MO] 리얼 디바이스 연결 시작 (Galaxy S23)...")
+    print("\n📱 [MO] 리얼 디바이스(한국IP) 연결 시작...")
     
     options = UiAutomator2Options()
     options.platform_name = "Android"
@@ -130,12 +136,14 @@ def run_real_app_crawling():
     options.app_activity = "com.google.android.apps.youtube.app.WatchWhileActivity"
     options.no_reset = False 
     
+    # ★ [핵심] 한국 IP로 접속하도록 설정 (geoLocation)
     bstack_options = {
         "projectName": "Youtube Monitor",
         "buildName": "Daily Check",
-        "sessionName": "Incognito Real App",
+        "sessionName": "Korea Incognito Test",
         "userName": BS_USER,
         "accessKey": BS_KEY,
+        "geoLocation": "KR", # ★★★ 이게 있어야 한국 광고가 나옵니다
         "idleTimeout": 300
     }
     options.set_capability("bstack:options", bstack_options)
@@ -144,100 +152,43 @@ def run_real_app_crawling():
     try:
         driver = webdriver.Remote(BS_URL, options=options)
         wait = WebDriverWait(driver, 20)
-        print("✅ 갤럭시 S23 연결 성공! 유튜브 앱 실행됨.")
+        print("✅ 갤럭시 S23(한국) 연결 성공!")
         time.sleep(5)
 
         # ----------------------------------
-        # 시크릿 모드 진입 시도
+        # [1회 실행] 시크릿 모드 진입
         # ----------------------------------
-        print("🕵️ 시크릿 모드 진입 시도...")
+        print("🕵️ 시크릿 모드 진입 중...")
         try:
-            # 프로필(You/Account) 찾기
+            # You(보관함) -> 시크릿 모드 켜기
             try:
-                profile = wait.until(EC.presence_of_element_located((AppiumBy.ACCESSIBILITY_ID, "You")))
-                profile.click()
+                driver.find_element(AppiumBy.ACCESSIBILITY_ID, "You").click()
             except:
                 try:
-                    profile = driver.find_element(AppiumBy.ACCESSIBILITY_ID, "Account")
-                    profile.click()
+                    driver.find_element(AppiumBy.ACCESSIBILITY_ID, "Account").click()
                 except:
-                    # S23 우측 하단 좌표 터치
-                    driver.tap([(950, 2200)])
+                    driver.tap([(980, 2200)]) # 좌표 클릭
             
-            time.sleep(3)
+            time.sleep(2)
             
-            # 시크릿 모드 켜기
-            incognito = driver.find_element(AppiumBy.XPATH, "//*[contains(@text, 'Incognito') or contains(@text, '시크릿')]")
-            incognito.click()
-            time.sleep(3)
-            
+            # '시크릿 모드 사용' 텍스트 클릭
             try:
-                got_it = driver.find_element(AppiumBy.XPATH, "//*[contains(@text, 'Got it') or contains(@text, '확인')]")
-                got_it.click()
+                driver.find_element(AppiumBy.XPATH, "//*[contains(@text, 'Incognito') or contains(@text, '시크릿')]").click()
+            except:
+                print("   (이미 시크릿 모드거나 버튼 못찾음)")
+            
+            time.sleep(3)
+            # 팝업 닫기
+            try: driver.find_element(AppiumBy.XPATH, "//*[contains(@text, 'Got it') or contains(@text, '확인')]").click()
             except: pass
             
         except Exception as e:
-            print(f"⚠️ 시크릿 모드 진입 이슈: {e}")
+            print(f"⚠️ 시크릿 모드 진입 이슈 (계속 진행): {e}")
 
         # ----------------------------------
-        # 검색 시작
+        # [무한 루프] 검색어만 바꿔가며 계속 검색
         # ----------------------------------
         for keyword in KEYWORDS:
-            print(f" >> [MO] '{keyword}' 검색 중...")
+            print(f" >> [MO] '{keyword}' 검색...")
             success = 0
             fails = 0
-            TARGET_MO_COUNT = 5 # 리얼기기는 느리니까 5개만 (조절가능)
-            
-            while success < TARGET_MO_COUNT:
-                try:
-                    search_icon = wait.until(EC.presence_of_element_located((AppiumBy.ACCESSIBILITY_ID, "Search")))
-                    search_icon.click()
-                    time.sleep(1)
-                    
-                    search_box = driver.find_element(AppiumBy.ID, "com.google.android.youtube:id/search_edit_text")
-                    search_box.clear()
-                    search_box.send_keys(keyword)
-                    driver.press_keycode(66) # Enter
-                    time.sleep(4) # 로딩 대기
-                    
-                    # 광고 스캔
-                    ad_found = False
-                    elements = driver.find_elements(AppiumBy.XPATH, "//*[contains(@text, 'Ad') or contains(@text, '광고') or contains(@text, 'Sponsored')]")
-                    real_ads = [el.text for el in elements if len(el.text) > 0]
-                    
-                    if len(real_ads) > 0:
-                        advertiser = real_ads[0]
-                        biz, comp = classify_advertiser(advertiser)
-                        results.append({"디바이스": "Mobile(App)", "회차": success+1, "키워드": keyword, "광고여부": "O", "광고주_구분": comp, "상세_광고주": advertiser, "광고형태": "앱광고", "영상제목/배너카피": "-"})
-                        print(f"   [MO] ⭕ 발견: {advertiser}")
-                    else:
-                        print("   [MO] ❌ 광고 없음")
-                        if keyword == "공무원":
-                             results.append({"디바이스": "Mobile(App)", "회차": success+1, "키워드": keyword, "광고여부": "X", "광고주_구분": "-", "상세_광고주": "-", "광고형태": "-", "영상제목/배너카피": "-"})
-                        else:
-                             results.append({"디바이스": "Mobile(App)", "회차": success+1, "키워드": keyword, "광고여부": "X", "광고주_구분": "미노출", "상세_광고주": "-", "광고형태": "-", "영상제목/배너카피": "-"})
-                    
-                    success += 1
-                except: 
-                    fails += 1
-                    if fails > 2: break 
-
-    except Exception as e:
-        print(f"BrowserStack 연결 실패: {e}")
-    finally:
-        if driver: driver.quit()
-        
-    return results
-
-if __name__ == "__main__":
-    pc_data = run_pc_crawling()
-    mo_data = run_real_app_crawling()
-    
-    final_data = pc_data + mo_data
-    
-    if final_data:
-        df = pd.DataFrame(final_data)
-        now_str = datetime.now().strftime('%Y-%m-%d-%H')
-        filename = f"유튜브_광고_모니터링_{now_str}.xlsx"
-        df.to_excel(filename, index=False)
-        print(f"\n✅ 저장 완료: {filename}")
