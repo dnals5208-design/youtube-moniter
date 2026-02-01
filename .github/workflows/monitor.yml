@@ -1,0 +1,65 @@
+name: Oracle Proxy Monitor
+
+on:
+  workflow_dispatch: # 수동 실행 버튼
+  schedule:
+    - cron: '30 5 * * *' # 매일 한국시간 오후 2시 30분 자동 실행 (UTC 05:30)
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install Libraries
+      run: |
+        pip install pandas openpyxl uiautomator2
+
+    - name: Setup SSH Tunnel (Korea IP)
+      env:
+        ORACLE_KEY: ${{ secrets.ORACLE_KEY }}
+        ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+        ORACLE_USER: ${{ secrets.ORACLE_USER }}
+      run: |
+        # SSH 키 생성 및 권한 설정
+        mkdir -p ~/.ssh
+        echo "$ORACLE_KEY" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        
+        # 오라클 서버 지문 등록
+        ssh-keyscan -H $ORACLE_HOST >> ~/.ssh/known_hosts
+        
+        # 터널링 시작 (8080포트 -> 오라클)
+        echo "🚀 오라클 서버로 터널 뚫는 중..."
+        ssh -D 8080 -f -C -q -N -i ~/.ssh/id_rsa $ORACLE_USER@$ORACLE_HOST
+        echo "✅ 터널 연결 완료"
+
+    - name: Enable KVM
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
+
+    - name: Run Android Emulator & Script
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: 29
+        target: default
+        arch: x86_64
+        profile: Nexus 6
+        # ★ 핵심: 에뮬레이터가 8080 포트(오라클 터널)를 통해 인터넷을 쓰도록 설정
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -http-proxy 127.0.0.1:8080
+        script: python main.py
+
+    - name: Upload Report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: youtube-report
+        path: result.xlsx
