@@ -42,19 +42,21 @@ jobs:
     - name: Run Android Emulator & Script
       uses: reactivecircus/android-emulator-runner@v2
       with:
-        api-level: 29
-        # 구글 앱들이 포함된 이미지 (유튜브 이미 깔려있음)
+        # ★ 수정됨: API 29 -> 33 (Android 13)으로 업그레이드!
+        # (유튜브 앱도 훨씬 최신 버전이 탑재됩니다)
+        api-level: 33
         target: google_apis
         arch: x86_64
-        profile: Nexus 6
+        profile: Pixel 6
         ram-size: 2048M
         heap-size: 512M
-        # 프록시 설정
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -http-proxy 127.0.0.1:8080
         
-        # ★ 수정됨: 설치 과정 삭제하고 바로 파이썬 실행
         script: |
-          echo "🚀 파이썬 스크립트 실행!"
+          echo "🚀 안드로이드 13(API 33) 부팅 완료. 유튜브 앱 버전 확인:"
+          adb shell dumpsys package com.google.android.youtube | grep versionName
+          
+          echo "🚀 파이썬 스크립트 실행 (실시간 로그)"
           python -u main.py
       env:
         GH_TOKEN: ${{ github.token }}
