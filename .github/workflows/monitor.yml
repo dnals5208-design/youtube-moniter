@@ -54,8 +54,8 @@ jobs:
         
         # ★ 수정됨: 설치 과정 삭제하고 바로 파이썬 실행
         script: |
-          echo "🚀 유튜브 앱이 이미 있으므로 바로 파이썬 실행합니다!"
-          python main.py
+          echo "🚀 파이썬 스크립트 실행!"
+          python -u main.py
       env:
         GH_TOKEN: ${{ github.token }}
         G_SHEET_KEY: ${{ secrets.G_SHEET_KEY }}
