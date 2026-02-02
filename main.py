@@ -6,6 +6,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import sys
+import re # 정규표현식 추가 (화면 분석 강화)
 
 # ==========================================
 # [설정]
@@ -54,10 +55,10 @@ def append_to_sheet(worksheet, data):
             print(f"   ⚠️ 시트 저장 실패: {e}")
 
 # ==========================================
-# [기능] 유튜브 제어 (디버깅 강화)
+# [기능] 유튜브 제어
 # ==========================================
 def handle_popups_and_incognito(d):
-    print("   🔨 초기 설정(팝업제거/시크릿모드)...")
+    print("   🔨 초기 설정 진행 중...")
     
     # 팝업 닫기
     for _ in range(3):
@@ -71,7 +72,7 @@ def handle_popups_and_incognito(d):
     d.click(0.92, 0.05) # 우측 상단 프로필
     time.sleep(2)
     
-    # 메뉴 텍스트 찾기 (버전마다 다름)
+    # 메뉴 찾기 (text와 content-desc 모두 확인)
     if d(text="Turn on Incognito").exists:
         d(text="Turn on Incognito").click()
     elif d(text="시크릿 모드 사용").exists:
@@ -112,50 +113,61 @@ def run_android_monitoring():
                 sys.stdout.flush()
                 print(f"   [{i}/{REPEAT_COUNT}] 진행 중...", end=" ")
                 
-                # 검색창 진입
+                # 1. 검색창 진입 (돋보기 클릭)
+                # (뒤로가기로 초기화했으므로 항상 홈 화면 상태라고 가정)
                 if not d(resourceId="com.google.android.youtube:id/search_edit_text").exists:
-                    d.click(0.9, 0.05)
+                    d.click(0.9, 0.05) # 우측 상단 돋보기 위치 클릭
                     time.sleep(2)
                 
-                # 검색어 입력
+                # 2. 검색어 입력
                 d.send_keys(keyword)
                 d.press("enter")
                 
-                # 로딩 대기
+                # 3. 로딩 대기
                 time.sleep(10)
                 
-                # 스크롤
+                # 4. 스크롤 (광고 로딩 유도)
                 d.swipe(500, 1500, 500, 500, 0.3) 
                 time.sleep(2)
                 
-                # 화면 분석
+                # 5. 화면 분석 (강화된 로직)
                 is_ad = "X"
                 ad_text = "-"
                 
                 try:
                     xml = d.dump_hierarchy()
                     
-                    # 광고 찾기
-                    if 'text="광고"' in xml or 'text="Ad"' in xml or 'text="Sponsored"' in xml:
+                    # '광고', 'Ad', 'Sponsored' 키워드 찾기 (text 및 content-desc 모두 검색)
+                    # 정규표현식으로 text="..." 또는 content-desc="..." 안의 내용을 추출
+                    texts_found = re.findall(r'(?:text|content-desc)="([^"]*)"', xml)
+                    
+                    # 광고 배지 확인
+                    ad_badge_found = False
+                    for t in texts_found:
+                        if t in ["광고", "Ad", "Sponsored", "이 광고", "앱 설치"]:
+                            ad_badge_found = True
+                            break
+                    
+                    if ad_badge_found:
                         is_ad = "O"
-                        lines = [line.split('"')[0] for line in xml.split('text="') if '"' in line]
-                        for line in lines:
-                            if len(line) > 1 and "광고" not in line and "분 전" not in line:
-                                 if any(k in line for k in ["해커스", "에듀윌", "공단기", "메가", "경단기", "소방", "야나두", "시원스쿨"]):
-                                     ad_text = line
+                        # 광고주 찾기 (해커스 등 키워드 포함된 텍스트 탐색)
+                        for t in texts_found:
+                            # 광고주 텍스트 조건: 길이가 적당하고, '광고' 단어가 아니고, 타임스탬프가 아님
+                            if len(t) > 1 and "광고" not in t and "분 전" not in t and "조회수" not in t:
+                                 if any(k in t for k in ["해커스", "에듀윌", "공단기", "메가", "경단기", "소방", "야나두", "시원스쿨", "YBM"]):
+                                     ad_text = t
                                      break
-                        if ad_text == "-": ad_text = "광고발견"
+                        if ad_text == "-": ad_text = "광고발견(상세미상)"
                         print(f"🚨 발견! ({ad_text})")
                     else:
-                        # ★ 디버깅: 광고가 없으면 화면에 뭐가 보이는지 3줄만 출력
-                        lines = [line.split('"')[0] for line in xml.split('text="') if '"' in line and len(line) > 2]
-                        summary = ", ".join(lines[:3]) # 상위 3개 텍스트만
-                        print(f"❌ 없음 (화면내용: {summary}...)")
+                        # 디버깅: 화면에 보이는 주요 텍스트 5개만 출력해봄
+                        summary = ", ".join([t for t in texts_found if len(t) > 3][:5])
+                        print(f"❌ 없음 (화면: {summary}...)")
 
                 except Exception as xml_e:
-                    print(f"⚠️ 화면 읽기 실패")
+                    print(f"⚠️ 화면 읽기 실패: {xml_e}")
                 
-                # 결과 저장
+                # 6. 결과 저장
                 result_data = {
                     "날짜": datetime.now().strftime('%Y-%m-%d'),
                     "시간": datetime.now().strftime('%H:%M:%S'),
@@ -166,15 +178,17 @@ def run_android_monitoring():
                 }
                 append_to_sheet(ws, result_data)
                 
-                # 검색창 비우기
-                if d(description="Clear search query").exists:
-                    d(description="Clear search query").click()
-                elif d(resourceId="com.google.android.youtube:id/search_clear").exists:
-                    d(resourceId="com.google.android.youtube:id/search_clear").click()
-                else:
-                    d.click(0.9, 0.05)
-                    time.sleep(1)
-                    d.clear_text()
+                # 7. ★ 중요: 초기화 (뒤로가기 전략)
+                # clear_text() 대신 뒤로가기를 연타하여 검색 모드를 빠져나감
+                d.press("back") # 키보드 내리기 / 검색창 닫기
+                time.sleep(1)
+                d.press("back") # 검색 결과창 나가기 (홈으로 복귀)
+                time.sleep(2)
+                
+                # 만약 홈으로 안 갔을까봐 한 번 더 체크 (검색창이 여전히 있으면 뒤로가기)
+                if d(resourceId="com.google.android.youtube:id/search_edit_text").exists:
+                     d.press("back")
+                     time.sleep(1)
 
     except Exception as e:
         print(f"에러 발생: {e}")
