@@ -52,24 +52,12 @@ jobs:
         # 힙 사이즈도 늘림
         heap-size: 512M
         # 프록시 설정
-        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -http-proxy 127.0.0.1:8080
+emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -http-proxy 127.0.0.1:8080
         
         script: |
           echo "📥 내 GitHub에서 유튜브 APK 다운로드 중..."
           # ★ 아래 주소를 아까 복사한 '선생님의 Release 링크'로 꼭 바꿔주세요!
-          wget -O youtube.apk "https://github.com/dnals5208-design/youtube-moniter/releases/download/v1.0/com.google.android.youtube_19.09.37-1544809920_minAPI26.arm64-v8a.armeabi-v7a.x86.x86_64.nodpi._apkmirror.com.apk"
-          
-          echo "🔧 유튜브 APK 설치 중..."
-          adb install -r -d com.google.android.youtube_19.09.37-1544809920_minAPI26.arm64-v8a.armeabi-v7a.x86.x86_64.nodpi._apkmirror.com.apk
-          
-          echo "🚀 파이썬 스크립트 실행"
-          python main.py
-        
-        # ★ 유튜브 앱 다운로드 및 설치 후 파이썬 실행
-        script: |
-          echo "📥 유튜브 APK 다운로드 중..."
-          # x86_64 에뮬레이터 호환 유튜브 APK 다운로드 (APKMirror 등에서 안정적인 버전 링크 사용)
-          wget -O youtube.apk "https://d.apkpure.com/b/APK/com.google.android.youtube?version=latest" --user-agent="Mozilla/5.0"
+          wget -O youtube.apk "https://github.com/dnals5208-design/youtube-moniter/releases/download/v1.0/youtube.apk"
           
           echo "🔧 유튜브 APK 설치 중..."
           adb install -r -d youtube.apk
