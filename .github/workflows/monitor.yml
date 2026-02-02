@@ -43,21 +43,17 @@ jobs:
       uses: reactivecircus/android-emulator-runner@v2
       with:
         api-level: 29
-        # ★ 핵심 변경: 구글 플레이 서비스가 포함된 이미지 사용
         target: google_apis
         arch: x86_64
         profile: Nexus 6
-        # 램을 좀 넉넉하게 줌
         ram-size: 2048M
-        # 힙 사이즈도 늘림
         heap-size: 512M
-        # 프록시 설정
-emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -http-proxy 127.0.0.1:8080
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -http-proxy 127.0.0.1:8080
         
         script: |
           echo "📥 내 GitHub에서 유튜브 APK 다운로드 중..."
-          # ★ 아래 주소를 아까 복사한 '선생님의 Release 링크'로 꼭 바꿔주세요!
-          wget -O youtube.apk "https://github.com/dnals5208-design/youtube-moniter/releases/download/v1.0/youtube.apk"
+          # ▼▼▼ 아래 주소를 선생님의 Release 링크로 꼭 수정하세요! ▼▼▼
+          wget -O youtube.apk "https://github.com/dnals5208-design/youtube-monitor/releases/download/v1.0/youtube.apk"
           
           echo "🔧 유튜브 APK 설치 중..."
           adb install -r -d youtube.apk
