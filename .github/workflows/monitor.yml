@@ -1,61 +1,17 @@
-name: Real App Monitor
-
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: '30 5 * * *' # 한국 14:30
-
-jobs:
-  monitor:
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
-
-    - name: Install Libraries
-      run: |
-        pip install pandas uiautomator2 gspread oauth2client
-
-    - name: Setup SSH Tunnel (Korea IP)
+- name: Setup SSH Tunnel (Korea IP)
       env:
         ORACLE_KEY: ${{ secrets.ORACLE_KEY }}
         ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
         ORACLE_USER: ${{ secrets.ORACLE_USER }}
       run: |
         mkdir -p ~/.ssh
-        echo "$ORACLE_KEY" > ~/.ssh/id_rsa
-        chmod 600 ~/.ssh/id_rsa
-        ssh-keyscan -H $ORACLE_HOST >> ~/.ssh/known_hosts
-        ssh -4 -D 8080 -f -C -q -N -i ~/.ssh/id_rsa $ORACLE_USER@$ORACLE_HOST
-
-    - name: Enable KVM
-      run: |
-        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-        sudo udevadm control --reload-rules
-        sudo udevadm trigger --name-match=kvm
-
-    - name: Run Android Emulator & Script
-      uses: reactivecircus/android-emulator-runner@v2
-      with:
-        api-level: 33
-        target: google_apis
-        arch: x86_64
-        profile: Nexus 6
-        ram-size: 2048M
-        heap-size: 512M
-        # DNS 설정(8.8.8.8)은 유지 (매우 중요)
-        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -dns-server 8.8.8.8 -no-snapshot-load -http-proxy 127.0.0.1:8080
         
-        # ★ 수정됨: 복잡한 쉘 스크립트 삭제 -> 파이썬 실행만 남김
-        script: |
-          echo "🚀 안드로이드 부팅 완료. 파이썬 스크립트 실행!"
-          python -u main.py
-      env:
-        GH_TOKEN: ${{ github.token }}
-        G_SHEET_KEY: ${{ secrets.G_SHEET_KEY }}
-        G_SHEET_ID: ${{ secrets.G_SHEET_ID }}
+        # 키 파일 생성 (줄바꿈 보존을 위해 printf 사용)
+        printf "%s\n" "$ORACLE_KEY" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        
+        # ★ 수정됨: ssh-keyscan 삭제하고, 접속 명령어에 '무조건 수락' 옵션 추가
+        # -o StrictHostKeyChecking=no: "이 서버 처음 보는데?" 묻지 말고 접속
+        # -o UserKnownHostsFile=/dev/null: 서버 지문 저장 안 함 (에러 방지)
+        # -v: 접속 과정을 로그에 자세히 찍음 (에러 나면 원인 보려고)
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -4 -D 8080 -f -C -N -i ~/.ssh/id_rsa $ORACLE_USER@$ORACLE_HOST -v
