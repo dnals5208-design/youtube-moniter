@@ -31,7 +31,8 @@ jobs:
         echo "$ORACLE_KEY" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
         ssh-keyscan -H $ORACLE_HOST >> ~/.ssh/known_hosts
-        ssh -D 8080 -f -C -q -N -i ~/.ssh/id_rsa $ORACLE_USER@$ORACLE_HOST
+        # -4: IPv4 강제 (연결 안정성 향상)
+        ssh -4 -D 8080 -f -C -q -N -i ~/.ssh/id_rsa $ORACLE_USER@$ORACLE_HOST
 
     - name: Enable KVM
       run: |
@@ -42,21 +43,37 @@ jobs:
     - name: Run Android Emulator & Script
       uses: reactivecircus/android-emulator-runner@v2
       with:
-        # ★ 안드로이드 13 (API 33) 유지
         api-level: 33
         target: google_apis
         arch: x86_64
-        # ★ 수정됨: 오류 나는 Pixel 6 대신 호환성 좋은 Nexus 6 사용
         profile: Nexus 6
         ram-size: 2048M
         heap-size: 512M
-        # 프록시 설정
-        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -http-proxy 127.0.0.1:8080
+        # ★ 수정됨 1: DNS 강제 설정 (8.8.8.8) + 스냅샷 로드 금지 (깨끗한 부팅)
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -dns-server 8.8.8.8 -no-snapshot-load -http-proxy 127.0.0.1:8080
         
         script: |
-          echo "🚀 안드로이드 13(API 33) 부팅 완료. 유튜브 앱 버전 확인:"
-          adb shell dumpsys package com.google.android.youtube | grep versionName
+          echo "🌐 인터넷 연결 확인 중..."
           
+          # 1. 인터넷 될 때까지 핑 테스트 (최대 3분 대기)
+          # 구글 DNS(8.8.8.8)로 핑을 날려봄
+          timeout=180
+          start_time=$(date +%s)
+          while true; do
+            if adb shell ping -c 1 -W 2 8.8.8.8 > /dev/null; then
+              echo "✅ 인터넷 연결 성공!"
+              break
+            fi
+            current_time=$(date +%s)
+            elapsed=$((current_time - start_time))
+            if [ $elapsed -ge $timeout ]; then
+              echo "❌ 인터넷 연결 실패 (시간 초과)"
+              exit 1
+            fi
+            echo "   ... 연결 대기 중 ($elapsed초 경과)"
+            sleep 5
+          done
+
           echo "🚀 파이썬 스크립트 실행 (실시간 로그)"
           python -u main.py
       env:
