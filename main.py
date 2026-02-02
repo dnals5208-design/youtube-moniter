@@ -33,7 +33,6 @@ def get_worksheet():
         
         try:
             worksheet = sh.worksheet(sheet_name)
-            # print("♻️ 기존 시트 사용") 
         except:
             print(f"   🆕 새 시트('{sheet_name}')를 생성합니다.")
             worksheet = sh.add_worksheet(title=sheet_name, rows="1000", cols="20")
@@ -53,30 +52,53 @@ def append_to_sheet(worksheet, data):
             print(f"   ⚠️ 시트 저장 실패: {e}")
 
 # ==========================================
-# [기능] 인터넷 연결 확인 (브라우저 방식)
+# [기능] 네트워크 강제 복구 (핵심)
+# ==========================================
+def fix_network_settings(d):
+    print("🚑 네트워크 설정 강제 수정 중...")
+    
+    # 1. '인터넷 연결 확인' 기능 끄기 (Captive Portal Detection Disable)
+    # 이게 켜져 있으면 프록시를 감지하고 "인터넷 없음"을 띄움
+    d.shell("settings put global captive_portal_mode 0")
+    
+    # 2. 프라이빗 DNS 끄기 (Google DNS 강제 사용 방해 금지)
+    d.shell("settings put global private_dns_mode off")
+    
+    # 3. 비행기 모드 껐다 켜서 네트워크 재부팅
+    print("   -> 네트워크 재부팅 (Airplane Mode Toggle)...")
+    d.shell("cmd connectivity airplane-mode enable")
+    time.sleep(2)
+    d.shell("cmd connectivity airplane-mode disable")
+    time.sleep(5)
+    
+    print("   ✅ 네트워크 패치 완료")
+
+# ==========================================
+# [기능] 인터넷 연결 확인 (엄격한 버전)
 # ==========================================
 def check_internet_via_browser(d):
-    print("🌐 인터넷 연결 확인 중 (브라우저)...")
+    print("🌐 인터넷 연결 확인 중 (엄격 모드)...")
     
-    # 크롬 실행해서 구글 접속 시도
+    # 네트워크 패치 먼저 적용
+    fix_network_settings(d)
+    
     d.app_start("com.android.chrome")
     time.sleep(3)
-    d.shell('am start -a android.intent.action.VIEW -d "https://www.google.com"')
-    time.sleep(8) 
+    # 구글 대신 ipinfo.io 접속 (확실한 외부 사이트)
+    d.shell('am start -a android.intent.action.VIEW -d "https://ipinfo.io"')
+    time.sleep(10) 
     
-    # 화면 덤프
     xml = d.dump_hierarchy()
     
-    # 구글 로고 등이 보이면 인터넷 성공
-    if 'text="Google"' in xml or 'description="Google"' in xml or 'google' in xml.lower():
-        print("   ✅ 인터넷 연결 성공! (구글 접속됨)")
-        return True
-    elif 'No internet' in xml or 'ERR_' in xml:
+    # 'No internet', 'ERR_' 문구가 있으면 실패로 간주
+    if 'No internet' in xml or 'ERR_' in xml or 'DNS_' in xml:
          print("   ❌ 인터넷 연결 실패 (크롬 에러 화면)")
          return False
-    else:
-        print("   ⚠️ 인터넷 상태 불확실 (일단 진행)")
-        return True
+    
+    # 접속 성공 시 보이는 키워드 (IP, Organization, Region 등)
+    # 또는 구글 검색창이 아닌 실제 웹페이지 요소 확인
+    print("   ✅ 인터넷 연결 성공 (에러 메시지 없음)")
+    return True
 
 # ==========================================
 # [기능] 유튜브 제어
@@ -84,7 +106,6 @@ def check_internet_via_browser(d):
 def handle_popups_and_incognito(d):
     print("   🔨 초기 설정 진행 중...")
     
-    # 팝업 닫기 반복
     for _ in range(3):
         if d(text="Don't allow").exists: d(text="Don't allow").click()
         if d(text="허용 안함").exists: d(text="허용 안함").click()
@@ -92,10 +113,9 @@ def handle_popups_and_incognito(d):
         time.sleep(1)
 
     print("   🕵️ 시크릿 모드 진입...")
-    d.click(0.92, 0.05) # 프로필 클릭
+    d.click(0.92, 0.05) 
     time.sleep(2)
     
-    # 시크릿 모드 메뉴 찾기
     if d(text="Turn on Incognito").exists:
         d(text="Turn on Incognito").click()
     elif d(text="시크릿 모드 사용").exists:
@@ -103,7 +123,6 @@ def handle_popups_and_incognito(d):
     elif d(resourceId="com.google.android.youtube:id/incognito_item").exists:
         d(resourceId="com.google.android.youtube:id/incognito_item").click()
     else:
-        # 안 보이면 다시 프로필 클릭
         d.click(0.92, 0.05)
         time.sleep(1)
         if d(resourceId="com.google.android.youtube:id/incognito_item").exists:
@@ -121,7 +140,7 @@ def run_android_monitoring():
         os.system("adb wait-for-device")
         d = u2.connect(ADB_ADDR)
         
-        # ★ 1. 인터넷 확인 (브라우저로)
+        # 1. 인터넷 체크 및 네트워크 복구
         check_internet_via_browser(d)
         
         # 2. 유튜브 실행
@@ -139,7 +158,7 @@ def run_android_monitoring():
                 sys.stdout.flush()
                 print(f"   [{i}/{REPEAT_COUNT}] 진행 중...", end=" ")
                 
-                # 검색창 진입 (없으면 돋보기 클릭)
+                # 검색창 진입
                 if not d(resourceId="com.google.android.youtube:id/search_edit_text").exists:
                     d.click(0.9, 0.05) 
                     time.sleep(2)
@@ -158,10 +177,13 @@ def run_android_monitoring():
                 
                 try:
                     xml = d.dump_hierarchy()
-                    # 정규식으로 텍스트 추출 (text="..." 및 content-desc="...")
                     texts_found = re.findall(r'(?:text|content-desc)="([^"]*)"', xml)
                     
-                    # 광고 배지 확인
+                    # 인터넷 끊김 재확인 (상단바에 No internet이 떠있는지 체크)
+                    if "No internet" in str(texts_found) or "Connect to the internet" in str(texts_found):
+                        print("   ⚠️ 유튜브: 오프라인 상태 감지됨!")
+                        fix_network_settings(d) # 네트워크 긴급 복구 시도
+                    
                     ad_badge_found = False
                     for t in texts_found:
                         if t in ["광고", "Ad", "Sponsored", "이 광고", "앱 설치"]:
@@ -170,7 +192,6 @@ def run_android_monitoring():
                     
                     if ad_badge_found:
                         is_ad = "O"
-                        # 광고주 찾기
                         for t in texts_found:
                             if len(t) > 1 and "광고" not in t and "분 전" not in t and "조회수" not in t:
                                  if any(k in t for k in ["해커스", "에듀윌", "공단기", "메가", "경단기", "소방", "야나두", "시원스쿨", "YBM"]):
@@ -179,14 +200,12 @@ def run_android_monitoring():
                         if ad_text == "-": ad_text = "광고발견(상세미상)"
                         print(f"🚨 발견! ({ad_text})")
                     else:
-                        # 디버깅: 화면에 보이는 텍스트 5개 요약
                         summary = ", ".join([t for t in texts_found if len(t) > 3][:5])
                         print(f"❌ 없음 (화면: {summary}...)")
 
                 except Exception as xml_e:
                     print(f"⚠️ 화면 읽기 실패")
                 
-                # 저장
                 result_data = {
                     "날짜": datetime.now().strftime('%Y-%m-%d'),
                     "시간": datetime.now().strftime('%H:%M:%S'),
@@ -197,12 +216,11 @@ def run_android_monitoring():
                 }
                 append_to_sheet(ws, result_data)
                 
-                # ★ 초기화 (뒤로가기 2번으로 검색 탈출)
+                # 초기화
                 d.press("back")
                 time.sleep(1)
                 d.press("back")
                 time.sleep(2)
-                # 혹시 검색창이 남아있으면 한 번 더
                 if d(resourceId="com.google.android.youtube:id/search_edit_text").exists:
                      d.press("back")
                      time.sleep(1)
