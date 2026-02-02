@@ -20,13 +20,13 @@ jobs:
     - name: Install System Dependencies (OCR)
       run: |
         sudo apt-get update
-        sudo apt-get install -y tesseract-ocr tesseract-ocr-kor libtesseract-dev
+        sudo apt-get install -y tesseract-ocr tesseract-ocr-kor libtesseract-dev net-tools
 
     - name: Install Libraries
       run: |
         pip install pandas uiautomator2 gspread oauth2client pytesseract Pillow
 
-    - name: Setup SSH Tunnel & Verify (Korea IP)
+    - name: Setup SSH Tunnel & Health Check (Korea IP)
       env:
         ORACLE_KEY: ${{ secrets.ORACLE_KEY }}
         ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
@@ -36,22 +36,30 @@ jobs:
         printf "%s\n" "$ORACLE_KEY" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
         
-        # 1. SSH 터널 연결 (아이디: ubuntu)
-        echo "🔌 SSH 터널 연결 시도..."
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -4 -D 8080 -f -C -N -i ~/.ssh/id_rsa $ORACLE_USER@$ORACLE_HOST -v
+        echo "🔌 SSH 터널 연결 시도... (ID: $ORACLE_USER)"
+        # -v: 로그 상세 출력, ServerAliveInterval: 연결 유지 설정
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=60 -4 -D 8080 -f -C -N -i ~/.ssh/id_rsa $ORACLE_USER@$ORACLE_HOST -v
         
-        # 2. 터널 안정화 대기
-        sleep 5
+        echo "⏳ 터널 안정화 대기 (10초)..."
+        sleep 10
         
-        # 3. 호스트에서 먼저 터널 테스트
-        echo "🌐 터널링 연결 테스트 (Host)..."
-        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --socks5-hostname 127.0.0.1:8080 https://www.google.com)
+        echo "🔍 포트 8080 확인 중..."
+        if ! netstat -tulpn | grep :8080; then
+          echo "❌ [치명적 오류] SSH 터널이 시작되자마자 죽었습니다!"
+          echo "원인 1: 오라클 클라우드 방화벽(Security List)에서 포트가 막힘."
+          echo "원인 2: 오라클 아이디($ORACLE_USER)가 틀림 (opc vs ubuntu)."
+          exit 1
+        fi
+        
+        echo "🌐 터널링 실제 접속 테스트 (Google via Proxy)..."
+        # 실제로 데이터를 보내봅니다. 여기서 막히면 방화벽 문제입니다.
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --socks5-hostname 127.0.0.1:8080 https://www.google.com || echo "FAIL")
         
         if [ "$HTTP_CODE" == "200" ]; then
-          echo "✅ 터널 연결 성공! (Google 접속 확인됨)"
+          echo "✅ 터널 연결 100% 성공! (Google 접속 됨)"
         else
-          echo "❌ 터널 연결 실패! (HTTP Code: $HTTP_CODE)"
-          echo "오라클 아이디($ORACLE_USER)나 키를 다시 확인해주세요."
+          echo "❌ 터널 연결 실패! (Curl 결과: $HTTP_CODE)"
+          echo "오라클 방화벽 설정을 꼭 확인해주세요."
           exit 1
         fi
 
@@ -70,12 +78,12 @@ jobs:
         profile: Nexus 6
         ram-size: 2048M
         heap-size: 512M
-        # 한국어 부팅 옵션 유지 (-prop persist.sys.language=ko)
-        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -dns-server 8.8.8.8 -no-snapshot-load -http-proxy 127.0.0.1:8080 -prop persist.sys.language=ko -prop persist.sys.country=KR
+        # ★ 수정됨: 한국어 강제 설정 (-prop) + 프록시 설정
+        # adb shell setprop 대신 부팅 옵션으로 넣어서 권한 문제 해결
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -dns-server 8.8.8.8 -no-snapshot-load -http-proxy 127.0.0.1:8080 -prop persist.sys.language=ko -prop persist.sys.country=KR -prop persist.sys.locale=ko-KR
         
-        # ★ 수정됨: 에러나던 setprop 명령어 삭제
         script: |
-          echo "🚀 안드로이드 부팅 완료. 파이썬 스크립트 실행!"
+          echo "🚀 안드로이드(한국어) 부팅 완료. 파이썬 스크립트 실행!"
           mkdir -p screenshots
           python -u main.py
 
