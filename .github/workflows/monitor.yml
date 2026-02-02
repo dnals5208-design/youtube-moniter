@@ -42,14 +42,15 @@ jobs:
     - name: Run Android Emulator & Script
       uses: reactivecircus/android-emulator-runner@v2
       with:
-        # ★ 수정됨: API 29 -> 33 (Android 13)으로 업그레이드!
-        # (유튜브 앱도 훨씬 최신 버전이 탑재됩니다)
+        # ★ 안드로이드 13 (API 33) 유지
         api-level: 33
         target: google_apis
         arch: x86_64
-        profile: Pixel 6
+        # ★ 수정됨: 오류 나는 Pixel 6 대신 호환성 좋은 Nexus 6 사용
+        profile: Nexus 6
         ram-size: 2048M
         heap-size: 512M
+        # 프록시 설정
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -http-proxy 127.0.0.1:8080
         
         script: |
