@@ -52,11 +52,11 @@ jobs:
         profile: Nexus 6
         ram-size: 2048M
         heap-size: 512M
-        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -dns-server 8.8.8.8 -no-snapshot-load -http-proxy 127.0.0.1:8080
+        # ★ 수정됨: 한국어(ko-KR) 강제 설정 옵션 추가 (-prop ...)
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -dns-server 8.8.8.8 -no-snapshot-load -http-proxy 127.0.0.1:8080 -prop persist.sys.language=ko -prop persist.sys.country=KR
         
         script: |
-          echo "🚀 안드로이드 부팅 완료. 파이썬 스크립트 실행!"
-          # 스크린샷 저장할 폴더 생성
+          echo "🚀 안드로이드(한국어) 부팅 완료. 파이썬 스크립트 실행!"
           mkdir -p screenshots
           python -u main.py
 
@@ -65,9 +65,8 @@ jobs:
         G_SHEET_KEY: ${{ secrets.G_SHEET_KEY }}
         G_SHEET_ID: ${{ secrets.G_SHEET_ID }}
 
-    # ★ 핵심 추가: 실행이 끝나면 스크린샷 폴더를 압축해서 업로드
     - name: Upload Screenshots
-      if: always() # 에러가 나도 무조건 실행
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: debug-screenshots
