@@ -6,7 +6,8 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import sys
-import re
+import pytesseract # OCR 라이브러리
+from PIL import Image # 이미지 처리
 
 # ==========================================
 # [설정]
@@ -52,52 +53,55 @@ def append_to_sheet(worksheet, data):
             print(f"   ⚠️ 시트 저장 실패: {e}")
 
 # ==========================================
-# [기능] 네트워크 강제 복구 (핵심)
+# [기능] 네트워크 강제 복구
 # ==========================================
 def fix_network_settings(d):
     print("🚑 네트워크 설정 강제 수정 중...")
-    
-    # 1. '인터넷 연결 확인' 기능 끄기 (Captive Portal Detection Disable)
-    # 이게 켜져 있으면 프록시를 감지하고 "인터넷 없음"을 띄움
     d.shell("settings put global captive_portal_mode 0")
-    
-    # 2. 프라이빗 DNS 끄기 (Google DNS 강제 사용 방해 금지)
     d.shell("settings put global private_dns_mode off")
-    
-    # 3. 비행기 모드 껐다 켜서 네트워크 재부팅
-    print("   -> 네트워크 재부팅 (Airplane Mode Toggle)...")
     d.shell("cmd connectivity airplane-mode enable")
     time.sleep(2)
     d.shell("cmd connectivity airplane-mode disable")
     time.sleep(5)
-    
     print("   ✅ 네트워크 패치 완료")
 
 # ==========================================
-# [기능] 인터넷 연결 확인 (엄격한 버전)
+# [기능] OCR (화면 캡처해서 글자 읽기) - 핵심!
+# ==========================================
+def read_screen_text(d):
+    try:
+        # 스크린샷 찍어서 파일로 저장
+        d.screenshot("current_screen.png")
+        
+        # 저장된 이미지를 읽어서 텍스트로 변환 (한글+영어)
+        text = pytesseract.image_to_string(Image.open("current_screen.png"), lang='kor+eng')
+        
+        # 줄바꿈 제거하고 한 줄로 정리
+        clean_text = " ".join(text.split())
+        return clean_text
+    except Exception as e:
+        print(f"   ⚠️ OCR 읽기 실패: {e}")
+        return ""
+
+# ==========================================
+# [기능] 인터넷 연결 확인 (OCR 방식)
 # ==========================================
 def check_internet_via_browser(d):
-    print("🌐 인터넷 연결 확인 중 (엄격 모드)...")
-    
-    # 네트워크 패치 먼저 적용
+    print("🌐 인터넷 연결 확인 중 (OCR 모드)...")
     fix_network_settings(d)
     
     d.app_start("com.android.chrome")
     time.sleep(3)
-    # 구글 대신 ipinfo.io 접속 (확실한 외부 사이트)
     d.shell('am start -a android.intent.action.VIEW -d "https://ipinfo.io"')
     time.sleep(10) 
     
-    xml = d.dump_hierarchy()
+    screen_text = read_screen_text(d)
     
-    # 'No internet', 'ERR_' 문구가 있으면 실패로 간주
-    if 'No internet' in xml or 'ERR_' in xml or 'DNS_' in xml:
+    if "No internet" in screen_text or "ERR_" in screen_text:
          print("   ❌ 인터넷 연결 실패 (크롬 에러 화면)")
          return False
     
-    # 접속 성공 시 보이는 키워드 (IP, Organization, Region 등)
-    # 또는 구글 검색창이 아닌 실제 웹페이지 요소 확인
-    print("   ✅ 인터넷 연결 성공 (에러 메시지 없음)")
+    print(f"   ✅ 인터넷 연결 확인됨 (화면 텍스트 일부: {screen_text[:30]}...)")
     return True
 
 # ==========================================
@@ -105,45 +109,40 @@ def check_internet_via_browser(d):
 # ==========================================
 def handle_popups_and_incognito(d):
     print("   🔨 초기 설정 진행 중...")
+    # 좌표로 팝업 닫기 시도 (중앙 하단, 중앙 등)
+    d.click(0.5, 0.9) # Got it 위치 추정
+    time.sleep(1)
     
-    for _ in range(3):
-        if d(text="Don't allow").exists: d(text="Don't allow").click()
-        if d(text="허용 안함").exists: d(text="허용 안함").click()
-        if d(text="Got it").exists: d(text="Got it").click()
-        time.sleep(1)
-
     print("   🕵️ 시크릿 모드 진입...")
-    d.click(0.92, 0.05) 
+    d.click(0.92, 0.05) # 프로필
     time.sleep(2)
     
-    if d(text="Turn on Incognito").exists:
-        d(text="Turn on Incognito").click()
-    elif d(text="시크릿 모드 사용").exists:
-        d(text="시크릿 모드 사용").click()
-    elif d(resourceId="com.google.android.youtube:id/incognito_item").exists:
-        d(resourceId="com.google.android.youtube:id/incognito_item").click()
+    # OCR로 메뉴 찾기 (좌표 클릭 시도)
+    text = read_screen_text(d)
+    if "Secret" in text or "시크릿" in text or "Incognito" in text:
+        # 메뉴가 떴으면 적당한 위치 클릭 (목록 중 하나겠거니 하고 좌표 클릭)
+        # 보통 시크릿 모드는 상단부에 있음
+        d.click(0.5, 0.3) 
     else:
+        # 안 떴으면 그냥 프로필 다시 누르고 좌표로 찍음
         d.click(0.92, 0.05)
         time.sleep(1)
-        if d(resourceId="com.google.android.youtube:id/incognito_item").exists:
-             d(resourceId="com.google.android.youtube:id/incognito_item").click()
+        d.click(0.5, 0.35) # 대략적인 시크릿모드 메뉴 위치
     
     time.sleep(4)
-    if d(text="Got it").exists: d(text="Got it").click()
-    print("   ✅ 설정 완료")
+    d.click(0.5, 0.9) # Got it 닫기
+    print("   ✅ 설정 완료 (좌표 기반)")
 
 def run_android_monitoring():
     ws = get_worksheet()
-    print(f"📱 [MO] 에뮬레이터 연결 (Android 13)...")
+    print(f"📱 [MO] 에뮬레이터 연결 (Android 13 + OCR)...")
 
     try:
         os.system("adb wait-for-device")
         d = u2.connect(ADB_ADDR)
         
-        # 1. 인터넷 체크 및 네트워크 복구
         check_internet_via_browser(d)
         
-        # 2. 유튜브 실행
         print("   -> 🔴 YouTube APP 실행")
         d.app_stop("com.google.android.youtube")
         d.app_start("com.google.android.youtube")
@@ -158,53 +157,39 @@ def run_android_monitoring():
                 sys.stdout.flush()
                 print(f"   [{i}/{REPEAT_COUNT}] 진행 중...", end=" ")
                 
-                # 검색창 진입
-                if not d(resourceId="com.google.android.youtube:id/search_edit_text").exists:
-                    d.click(0.9, 0.05) 
-                    time.sleep(2)
+                # 1. 돋보기 클릭 (좌표)
+                d.click(0.9, 0.05) 
+                time.sleep(2)
                 
+                # 2. 검색어 입력
                 d.send_keys(keyword)
                 d.press("enter")
                 
-                # 로딩 대기
+                # 3. 로딩 대기
                 time.sleep(10)
                 d.swipe(500, 1500, 500, 500, 0.3) 
-                time.sleep(2)
+                time.sleep(3)
                 
-                # 화면 분석
+                # 4. ★ OCR로 화면 분석
+                screen_text = read_screen_text(d)
+                
                 is_ad = "X"
                 ad_text = "-"
                 
-                try:
-                    xml = d.dump_hierarchy()
-                    texts_found = re.findall(r'(?:text|content-desc)="([^"]*)"', xml)
+                # 텍스트에서 광고 키워드 찾기
+                if "광고" in screen_text or "Ad" in screen_text or "Sponsored" in screen_text:
+                    is_ad = "O"
+                    ad_text = "광고 발견 (OCR 인식)"
                     
-                    # 인터넷 끊김 재확인 (상단바에 No internet이 떠있는지 체크)
-                    if "No internet" in str(texts_found) or "Connect to the internet" in str(texts_found):
-                        print("   ⚠️ 유튜브: 오프라인 상태 감지됨!")
-                        fix_network_settings(d) # 네트워크 긴급 복구 시도
-                    
-                    ad_badge_found = False
-                    for t in texts_found:
-                        if t in ["광고", "Ad", "Sponsored", "이 광고", "앱 설치"]:
-                            ad_badge_found = True
+                    # 광고주 찾기
+                    for k in ["해커스", "에듀윌", "공단기", "메가", "경단기", "소방", "야나두", "시원스쿨", "YBM"]:
+                        if k in screen_text:
+                            ad_text = f"{k} 광고"
                             break
-                    
-                    if ad_badge_found:
-                        is_ad = "O"
-                        for t in texts_found:
-                            if len(t) > 1 and "광고" not in t and "분 전" not in t and "조회수" not in t:
-                                 if any(k in t for k in ["해커스", "에듀윌", "공단기", "메가", "경단기", "소방", "야나두", "시원스쿨", "YBM"]):
-                                     ad_text = t
-                                     break
-                        if ad_text == "-": ad_text = "광고발견(상세미상)"
-                        print(f"🚨 발견! ({ad_text})")
-                    else:
-                        summary = ", ".join([t for t in texts_found if len(t) > 3][:5])
-                        print(f"❌ 없음 (화면: {summary}...)")
-
-                except Exception as xml_e:
-                    print(f"⚠️ 화면 읽기 실패")
+                    print(f"🚨 발견! ({ad_text})")
+                else:
+                    # 디버깅용: 읽은 글자 앞부분만 출력
+                    print(f"❌ 없음 (OCR 인식내용: {screen_text[:40]}...)")
                 
                 result_data = {
                     "날짜": datetime.now().strftime('%Y-%m-%d'),
@@ -216,14 +201,13 @@ def run_android_monitoring():
                 }
                 append_to_sheet(ws, result_data)
                 
-                # 초기화
+                # 5. 초기화 (뒤로가기)
                 d.press("back")
                 time.sleep(1)
                 d.press("back")
                 time.sleep(2)
-                if d(resourceId="com.google.android.youtube:id/search_edit_text").exists:
-                     d.press("back")
-                     time.sleep(1)
+                # 검색창 남아있으면 한번 더
+                d.press("back") 
 
     except Exception as e:
         print(f"에러 발생: {e}")
