@@ -17,7 +17,6 @@ jobs:
       with:
         python-version: '3.10'
 
-    # ★ 핵심 추가: 리눅스에 한글 인식 가능한 OCR 도구 설치
     - name: Install System Dependencies (OCR)
       run: |
         sudo apt-get update
@@ -25,7 +24,6 @@ jobs:
 
     - name: Install Libraries
       run: |
-        # pytesseract (OCR 파이썬 연결책) 추가
         pip install pandas uiautomator2 gspread oauth2client pytesseract Pillow
 
     - name: Setup SSH Tunnel (Korea IP)
@@ -58,8 +56,19 @@ jobs:
         
         script: |
           echo "🚀 안드로이드 부팅 완료. 파이썬 스크립트 실행!"
+          # 스크린샷 저장할 폴더 생성
+          mkdir -p screenshots
           python -u main.py
+
       env:
         GH_TOKEN: ${{ github.token }}
         G_SHEET_KEY: ${{ secrets.G_SHEET_KEY }}
         G_SHEET_ID: ${{ secrets.G_SHEET_ID }}
+
+    # ★ 핵심 추가: 실행이 끝나면 스크린샷 폴더를 압축해서 업로드
+    - name: Upload Screenshots
+      if: always() # 에러가 나도 무조건 실행
+      uses: actions/upload-artifact@v4
+      with:
+        name: debug-screenshots
+        path: screenshots/
