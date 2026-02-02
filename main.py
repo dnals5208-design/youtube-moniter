@@ -33,7 +33,7 @@ def get_worksheet():
         
         try:
             worksheet = sh.worksheet(sheet_name)
-            # print(f"   ♻️ 기존 시트 발견") # 로그 너무 많아서 생략
+            # print("♻️ 기존 시트 사용") 
         except:
             print(f"   🆕 새 시트('{sheet_name}')를 생성합니다.")
             worksheet = sh.add_worksheet(title=sheet_name, rows="1000", cols="20")
@@ -53,26 +53,26 @@ def append_to_sheet(worksheet, data):
             print(f"   ⚠️ 시트 저장 실패: {e}")
 
 # ==========================================
-# [기능] 실제 인터넷 연결 확인 (브라우저 방식)
+# [기능] 인터넷 연결 확인 (브라우저 방식)
 # ==========================================
 def check_internet_via_browser(d):
     print("🌐 인터넷 연결 확인 중 (브라우저)...")
     
-    # 크롬 실행해서 google.com 접속 시도
+    # 크롬 실행해서 구글 접속 시도
     d.app_start("com.android.chrome")
     time.sleep(3)
     d.shell('am start -a android.intent.action.VIEW -d "https://www.google.com"')
-    time.sleep(8) # 로딩 대기
+    time.sleep(8) 
     
+    # 화면 덤프
     xml = d.dump_hierarchy()
     
-    # 구글 로고나 검색창이 보이는지 확인
+    # 구글 로고 등이 보이면 인터넷 성공
     if 'text="Google"' in xml or 'description="Google"' in xml or 'google' in xml.lower():
         print("   ✅ 인터넷 연결 성공! (구글 접속됨)")
         return True
     elif 'No internet' in xml or 'ERR_' in xml:
          print("   ❌ 인터넷 연결 실패 (크롬 에러 화면)")
-         # 실패해도 혹시 모르니 진행은 함 (유튜브는 될 수도 있음)
          return False
     else:
         print("   ⚠️ 인터넷 상태 불확실 (일단 진행)")
@@ -84,6 +84,7 @@ def check_internet_via_browser(d):
 def handle_popups_and_incognito(d):
     print("   🔨 초기 설정 진행 중...")
     
+    # 팝업 닫기 반복
     for _ in range(3):
         if d(text="Don't allow").exists: d(text="Don't allow").click()
         if d(text="허용 안함").exists: d(text="허용 안함").click()
@@ -91,9 +92,10 @@ def handle_popups_and_incognito(d):
         time.sleep(1)
 
     print("   🕵️ 시크릿 모드 진입...")
-    d.click(0.92, 0.05) 
+    d.click(0.92, 0.05) # 프로필 클릭
     time.sleep(2)
     
+    # 시크릿 모드 메뉴 찾기
     if d(text="Turn on Incognito").exists:
         d(text="Turn on Incognito").click()
     elif d(text="시크릿 모드 사용").exists:
@@ -101,6 +103,7 @@ def handle_popups_and_incognito(d):
     elif d(resourceId="com.google.android.youtube:id/incognito_item").exists:
         d(resourceId="com.google.android.youtube:id/incognito_item").click()
     else:
+        # 안 보이면 다시 프로필 클릭
         d.click(0.92, 0.05)
         time.sleep(1)
         if d(resourceId="com.google.android.youtube:id/incognito_item").exists:
@@ -111,7 +114,7 @@ def handle_popups_and_incognito(d):
     print("   ✅ 설정 완료")
 
 def run_android_monitoring():
-    ws = get_worksheet() # 시트 연결 먼저
+    ws = get_worksheet()
     print(f"📱 [MO] 에뮬레이터 연결 (Android 13)...")
 
     try:
@@ -136,6 +139,7 @@ def run_android_monitoring():
                 sys.stdout.flush()
                 print(f"   [{i}/{REPEAT_COUNT}] 진행 중...", end=" ")
                 
+                # 검색창 진입 (없으면 돋보기 클릭)
                 if not d(resourceId="com.google.android.youtube:id/search_edit_text").exists:
                     d.click(0.9, 0.05) 
                     time.sleep(2)
@@ -143,17 +147,21 @@ def run_android_monitoring():
                 d.send_keys(keyword)
                 d.press("enter")
                 
+                # 로딩 대기
                 time.sleep(10)
                 d.swipe(500, 1500, 500, 500, 0.3) 
                 time.sleep(2)
                 
+                # 화면 분석
                 is_ad = "X"
                 ad_text = "-"
                 
                 try:
                     xml = d.dump_hierarchy()
+                    # 정규식으로 텍스트 추출 (text="..." 및 content-desc="...")
                     texts_found = re.findall(r'(?:text|content-desc)="([^"]*)"', xml)
                     
+                    # 광고 배지 확인
                     ad_badge_found = False
                     for t in texts_found:
                         if t in ["광고", "Ad", "Sponsored", "이 광고", "앱 설치"]:
@@ -162,6 +170,7 @@ def run_android_monitoring():
                     
                     if ad_badge_found:
                         is_ad = "O"
+                        # 광고주 찾기
                         for t in texts_found:
                             if len(t) > 1 and "광고" not in t and "분 전" not in t and "조회수" not in t:
                                  if any(k in t for k in ["해커스", "에듀윌", "공단기", "메가", "경단기", "소방", "야나두", "시원스쿨", "YBM"]):
@@ -170,12 +179,14 @@ def run_android_monitoring():
                         if ad_text == "-": ad_text = "광고발견(상세미상)"
                         print(f"🚨 발견! ({ad_text})")
                     else:
+                        # 디버깅: 화면에 보이는 텍스트 5개 요약
                         summary = ", ".join([t for t in texts_found if len(t) > 3][:5])
                         print(f"❌ 없음 (화면: {summary}...)")
 
                 except Exception as xml_e:
                     print(f"⚠️ 화면 읽기 실패")
                 
+                # 저장
                 result_data = {
                     "날짜": datetime.now().strftime('%Y-%m-%d'),
                     "시간": datetime.now().strftime('%H:%M:%S'),
@@ -186,10 +197,12 @@ def run_android_monitoring():
                 }
                 append_to_sheet(ws, result_data)
                 
+                # ★ 초기화 (뒤로가기 2번으로 검색 탈출)
                 d.press("back")
                 time.sleep(1)
                 d.press("back")
                 time.sleep(2)
+                # 혹시 검색창이 남아있으면 한 번 더
                 if d(resourceId="com.google.android.youtube:id/search_edit_text").exists:
                      d.press("back")
                      time.sleep(1)
