@@ -15,6 +15,7 @@ from PIL import Image
 ADB_ADDR = "emulator-5554" 
 KEYWORDS = ["해커스", "토익", "경찰공무원", "소방공무원", "공무원"]
 REPEAT_COUNT = 10 
+SCREENSHOT_DIR = "screenshots" # 스크린샷 저장 폴더
 
 # ==========================================
 # [기능] 구글 시트 연결
@@ -65,69 +66,83 @@ def fix_network_settings(d):
     print("   ✅ 네트워크 패치 완료")
 
 # ==========================================
-# [기능] OCR (화면 읽기)
+# [기능] OCR 및 스크린샷 저장 (핵심!)
 # ==========================================
-def read_screen_text(d):
+def read_screen_text(d, filename=None):
     try:
-        d.screenshot("current_screen.png")
-        text = pytesseract.image_to_string(Image.open("current_screen.png"), lang='kor+eng')
+        # 스크린샷 찍기
+        temp_path = "current_screen.png"
+        d.screenshot(temp_path)
+        
+        # 파일 저장 요청이 있으면 복사해서 저장 (증거 남기기)
+        if filename:
+            save_path = os.path.join(SCREENSHOT_DIR, filename)
+            os.system(f"cp {temp_path} {save_path}")
+            print(f"   📸 스크린샷 저장됨: {filename}")
+        
+        # OCR 분석
+        text = pytesseract.image_to_string(Image.open(temp_path), lang='kor+eng')
         clean_text = " ".join(text.split())
         return clean_text
     except Exception as e:
-        print(f"   ⚠️ OCR 읽기 실패: {e}")
+        print(f"   ⚠️ OCR/스크린샷 실패: {e}")
         return ""
 
 # ==========================================
-# [기능] 인터넷/IP 확인 (IP 위치 출력 추가)
+# [기능] 인터넷/IP 확인 (크롬 초기설정 통과 추가)
 # ==========================================
 def check_internet_via_browser(d):
     print("🌐 인터넷 및 IP 위치 확인 중...")
     fix_network_settings(d)
     
     d.app_start("com.android.chrome")
-    time.sleep(3)
-    # ipinfo.io로 접속해서 국가코드 확인
+    time.sleep(5)
+    
+    # ★ 크롬 'Welcome' 화면 넘기기 (Accept & Continue)
+    d.click(0.5, 0.9) # 하단 중앙 클릭 (Accept)
+    time.sleep(2)
+    d.click(0.2, 0.9) # 좌측 하단 (No Thanks)
+    time.sleep(2)
+
+    # IP 확인 사이트 접속
     d.shell('am start -a android.intent.action.VIEW -d "https://ipinfo.io/json"')
     time.sleep(8) 
     
-    screen_text = read_screen_text(d)
+    # 스크린샷 저장 (IP 확인용)
+    screen_text = read_screen_text(d, filename="ip_check.png")
     
     if "No internet" in screen_text or "ERR_" in screen_text:
          print("   ❌ 인터넷 연결 실패")
          return False
     
-    # 국가 코드 확인
-    if "KR" in screen_text or "Korea" in screen_text:
-        print(f"   ✅ 한국 IP 확인됨! (OCR 내용: {screen_text[:30]}...)")
+    if "KR" in screen_text or "Korea" in screen_text or "South Korea" in screen_text:
+        print(f"   ✅ 한국 IP 확인됨! (내용: {screen_text[:30]}...)")
     else:
-        print(f"   ⚠️ 한국 IP 아닐 수 있음 (OCR 내용: {screen_text[:30]}...)")
+        print(f"   ⚠️ 한국 IP 아닐 수 있음 (내용: {screen_text[:30]}...)")
         
     return True
 
 # ==========================================
-# [기능] 유튜브 실행 및 설정
+# [기능] 유튜브 실행
 # ==========================================
 def setup_youtube(d):
     print("   🔨 유튜브 초기 설정...")
     
-    # 딥링크로 일단 유튜브를 한 번 켬
     d.shell('am start -a android.intent.action.VIEW -d "https://www.youtube.com" -p com.google.android.youtube')
     time.sleep(10)
 
-    # 팝업 대충 닫기 (좌표)
-    d.click(0.5, 0.9) # Got it / Skip
+    # 팝업 닫기
+    d.click(0.5, 0.9) 
     time.sleep(1)
-    d.click(0.5, 0.8) # No thanks
-    time.sleep(1)
+    d.click(0.5, 0.8)
 
     print("   🕵️ 시크릿 모드 진입 시도...")
-    d.click(0.92, 0.05) # 프로필
+    d.click(0.92, 0.05) 
     time.sleep(2)
     
-    # OCR로 메뉴 확인
     text = read_screen_text(d)
     if "Secret" in text or "시크릿" in text or "Incognito" in text:
-        d.click(0.5, 0.3) # 대략적 위치
+        d.click(0.5, 0.3) 
     else:
         d.click(0.92, 0.05)
         time.sleep(1)
@@ -145,43 +160,33 @@ def run_android_monitoring():
         os.system("adb wait-for-device")
         d = u2.connect(ADB_ADDR)
         
-        # 1. 인터넷 & IP 확인
         check_internet_via_browser(d)
-        
-        # 2. 유튜브 켜고 시크릿 모드
         setup_youtube(d)
 
         for keyword in KEYWORDS:
-            print(f"\n🔎 [{keyword}] 검색 시작 (딥링크 방식)")
+            print(f"\n🔎 [{keyword}] 검색 시작")
             
             for i in range(1, REPEAT_COUNT + 1):
                 sys.stdout.flush()
                 print(f"   [{i}/{REPEAT_COUNT}] 진행 중...", end=" ")
                 
-                # ★ 핵심 변경: 딥링크로 검색 결과 페이지 강제 이동
-                # 앱이 꺼져있든 켜져있든 상관없이 바로 검색 결과로 점프함
-                # 뒤로가기 누를 필요 없음
+                # 딥링크 검색
                 cmd = f'am start -a android.intent.action.VIEW -d "https://www.youtube.com/results?search_query={keyword}" -p com.google.android.youtube'
                 d.shell(cmd)
                 
-                # 로딩 대기
                 time.sleep(10)
-                
-                # 스크롤 (광고 로딩 유도)
                 d.swipe(500, 1500, 500, 500, 0.3) 
                 time.sleep(3)
                 
-                # OCR로 화면 분석
-                screen_text = read_screen_text(d)
+                # ★ 스크린샷 저장 (파일명: 키워드_회차.png)
+                file_name = f"{keyword}_{i}.png"
+                screen_text = read_screen_text(d, filename=file_name)
                 
                 is_ad = "X"
                 ad_text = "-"
                 
-                # 바탕화면으로 튕겼는지 확인 (Settings, Clock 등이 보이면 튕긴 것)
                 if "Settings" in screen_text and "Clock" in screen_text:
-                     print("   ⚠️ 바탕화면으로 튕김 -> 다음 루프에서 재진입")
-                     # 재진입을 위해 아무것도 안 하고 넘어감 (다음 딥링크가 해결해줌)
-                
+                     print("   ⚠️ 바탕화면 튕김")
                 elif "광고" in screen_text or "Ad" in screen_text or "Sponsored" in screen_text:
                     is_ad = "O"
                     ad_text = "광고 발견"
@@ -191,7 +196,7 @@ def run_android_monitoring():
                             break
                     print(f"🚨 발견! ({ad_text})")
                 else:
-                    print(f"❌ 없음 (인식: {screen_text[:30]}...)")
+                    print(f"❌ 없음")
                 
                 result_data = {
                     "날짜": datetime.now().strftime('%Y-%m-%d'),
@@ -203,11 +208,10 @@ def run_android_monitoring():
                 }
                 append_to_sheet(ws, result_data)
                 
-                # 뒤로가기 로직 삭제함 (딥링크가 알아서 처리)
-                time.sleep(1)
-
     except Exception as e:
         print(f"에러 발생: {e}")
 
 if __name__ == "__main__":
+    if not os.path.exists(SCREENSHOT_DIR):
+        os.makedirs(SCREENSHOT_DIR)
     run_android_monitoring()
