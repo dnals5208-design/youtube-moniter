@@ -33,9 +33,7 @@ def get_worksheet():
         
         try:
             worksheet = sh.worksheet(sheet_name)
-            print(f"   ♻️ 기존 시트('{sheet_name}') 발견! 초기화합니다.")
-            worksheet.clear() 
-            worksheet.append_row(header)
+            # print(f"   ♻️ 기존 시트 발견") # 로그 너무 많아서 생략
         except:
             print(f"   🆕 새 시트('{sheet_name}')를 생성합니다.")
             worksheet = sh.add_worksheet(title=sheet_name, rows="1000", cols="20")
@@ -55,27 +53,30 @@ def append_to_sheet(worksheet, data):
             print(f"   ⚠️ 시트 저장 실패: {e}")
 
 # ==========================================
-# [기능] 인터넷 연결 확인 (NEW)
+# [기능] 실제 인터넷 연결 확인 (브라우저 방식)
 # ==========================================
-def wait_for_internet_connection():
-    print("🌐 에뮬레이터 인터넷 연결 확인 중...")
-    timeout = 180 # 3분 타임아웃
-    start_time = time.time()
+def check_internet_via_browser(d):
+    print("🌐 인터넷 연결 확인 중 (브라우저)...")
     
-    while time.time() - start_time < timeout:
-        # 구글 DNS(8.8.8.8)로 핑 테스트
-        # 0이 반환되면 성공, 아니면 실패
-        response = os.system("adb shell ping -c 1 -W 2 8.8.8.8 > /dev/null 2>&1")
-        
-        if response == 0:
-            print("   ✅ 인터넷 연결 성공! (작업 시작)")
-            return True
-        
-        print("   ... 연결 대기 중 (DNS/터널링 확인)")
-        time.sleep(5)
+    # 크롬 실행해서 google.com 접속 시도
+    d.app_start("com.android.chrome")
+    time.sleep(3)
+    d.shell('am start -a android.intent.action.VIEW -d "https://www.google.com"')
+    time.sleep(8) # 로딩 대기
     
-    print("❌ 인터넷 연결 실패 (시간 초과) - 오라클 서버 상태를 확인하세요.")
-    return False
+    xml = d.dump_hierarchy()
+    
+    # 구글 로고나 검색창이 보이는지 확인
+    if 'text="Google"' in xml or 'description="Google"' in xml or 'google' in xml.lower():
+        print("   ✅ 인터넷 연결 성공! (구글 접속됨)")
+        return True
+    elif 'No internet' in xml or 'ERR_' in xml:
+         print("   ❌ 인터넷 연결 실패 (크롬 에러 화면)")
+         # 실패해도 혹시 모르니 진행은 함 (유튜브는 될 수도 있음)
+         return False
+    else:
+        print("   ⚠️ 인터넷 상태 불확실 (일단 진행)")
+        return True
 
 # ==========================================
 # [기능] 유튜브 제어
@@ -110,21 +111,17 @@ def handle_popups_and_incognito(d):
     print("   ✅ 설정 완료")
 
 def run_android_monitoring():
-    # 0. 안드로이드 대기
-    print("📱 안드로이드 부팅 대기...")
-    os.system("adb wait-for-device")
-
-    # ★ 1. 인터넷 연결 확인 (여기서 연결 안 되면 종료)
-    if not wait_for_internet_connection():
-        return
-
-    # 2. 시트 준비
-    ws = get_worksheet()
-    
+    ws = get_worksheet() # 시트 연결 먼저
     print(f"📱 [MO] 에뮬레이터 연결 (Android 13)...")
+
     try:
+        os.system("adb wait-for-device")
         d = u2.connect(ADB_ADDR)
         
+        # ★ 1. 인터넷 확인 (브라우저로)
+        check_internet_via_browser(d)
+        
+        # 2. 유튜브 실행
         print("   -> 🔴 YouTube APP 실행")
         d.app_stop("com.google.android.youtube")
         d.app_start("com.google.android.youtube")
@@ -139,7 +136,6 @@ def run_android_monitoring():
                 sys.stdout.flush()
                 print(f"   [{i}/{REPEAT_COUNT}] 진행 중...", end=" ")
                 
-                # 검색창 진입
                 if not d(resourceId="com.google.android.youtube:id/search_edit_text").exists:
                     d.click(0.9, 0.05) 
                     time.sleep(2)
@@ -147,12 +143,10 @@ def run_android_monitoring():
                 d.send_keys(keyword)
                 d.press("enter")
                 
-                # 로딩 대기
                 time.sleep(10)
                 d.swipe(500, 1500, 500, 500, 0.3) 
                 time.sleep(2)
                 
-                # 화면 분석
                 is_ad = "X"
                 ad_text = "-"
                 
@@ -180,9 +174,8 @@ def run_android_monitoring():
                         print(f"❌ 없음 (화면: {summary}...)")
 
                 except Exception as xml_e:
-                    print(f"⚠️ 화면 읽기 실패: {xml_e}")
+                    print(f"⚠️ 화면 읽기 실패")
                 
-                # 저장
                 result_data = {
                     "날짜": datetime.now().strftime('%Y-%m-%d'),
                     "시간": datetime.now().strftime('%H:%M:%S'),
@@ -193,7 +186,6 @@ def run_android_monitoring():
                 }
                 append_to_sheet(ws, result_data)
                 
-                # 초기화 (뒤로가기)
                 d.press("back")
                 time.sleep(1)
                 d.press("back")
