@@ -18,7 +18,7 @@ REPEAT_COUNT = 10
 SCREENSHOT_DIR = "screenshots"
 
 # ==========================================
-# [기능] 구글 시트 연결
+# [기능] 구글 시트 연결 (무조건 초기화)
 # ==========================================
 def get_worksheet():
     try:
@@ -35,7 +35,11 @@ def get_worksheet():
         
         try:
             worksheet = sh.worksheet(sheet_name)
+            print(f"   ♻️ 기존 시트('{sheet_name}') 발견! 내용을 초기화합니다.")
+            worksheet.clear()  # ★ 기존 내용 삭제
+            worksheet.append_row(header) # 헤더 다시 쓰기
         except:
+            print(f"   🆕 새 시트('{sheet_name}')를 생성합니다.")
             worksheet = sh.add_worksheet(title=sheet_name, rows="1000", cols="20")
             worksheet.append_row(header)
         return worksheet
@@ -70,7 +74,7 @@ def read_screen_text(d, filename=None):
         return ""
 
 # ==========================================
-# [기능] IP 확인 (팝업 제거 강화)
+# [기능] IP 확인 (크롬 + 팝업 완벽 제거)
 # ==========================================
 def check_ip_and_setup(d):
     print("🌐 인터넷 및 IP 위치 확인 중...")
@@ -83,23 +87,15 @@ def check_ip_and_setup(d):
     d.app_start("com.android.chrome")
     time.sleep(5)
     
-    # 1. Welcome 화면 넘기기 (Accept)
-    d.click(0.5, 0.9) 
-    time.sleep(2)
-    
-    # 2. 동기화 설정 넘기기 (No Thanks) - 좌측 하단
-    d.click(0.2, 0.9) 
-    time.sleep(3)
-
-    # ★ 3. 알림 권한 팝업 넘기기 (No Thanks) - 한번 더 클릭
-    # (이미지 1번 문제 해결)
+    # 팝업 닫기 (Accept, No Thanks 등)
+    # 좌표 클릭으로 무지성 닫기 시도
+    d.click(0.5, 0.9) # Accept
+    time.sleep(1)
+    d.click(0.2, 0.9) # No Thanks
+    time.sleep(1)
     if d(text="No thanks").exists:
         d(text="No thanks").click()
-    else:
-        # 혹시 텍스트 못 찾으면 좌표로 (좌측 하단)
-        d.click(0.2, 0.9)
-    time.sleep(2)
-
+    
     # IP 확인 사이트 접속
     d.shell('am start -a android.intent.action.VIEW -d "https://ipinfo.io/json"')
     time.sleep(8) 
@@ -107,10 +103,15 @@ def check_ip_and_setup(d):
     # 스크린샷 저장
     screen_text = read_screen_text(d, filename="ip_check.png")
     
+    # 연결 거부(ERR_CONNECTION_REFUSED) 확인
+    if "REFUSED" in screen_text or "reached" in screen_text:
+        print("   ❌ [치명적] 프록시 연결 거부됨! SSH 터널이 끊겼습니다.")
+        # 그래도 일단 진행은 해봄
+    
     if "KR" in screen_text or "Korea" in screen_text or "South Korea" in screen_text:
         print(f"   ✅ 한국 IP 확인됨! (내용: {screen_text[:30]}...)")
     else:
-        print(f"   ⚠️ 한국 IP 아닐 수 있음 (내용: {screen_text[:30]}...)")
+        print(f"   ⚠️ 한국 IP 아님 (내용: {screen_text[:30]}...)")
 
 # ==========================================
 # [기능] 유튜브 실행
@@ -121,16 +122,14 @@ def setup_youtube(d):
     d.app_start("com.google.android.youtube")
     time.sleep(8)
 
-    # 팝업 닫기 (Got it 등)
+    # 팝업 닫기
     d.click(0.5, 0.9) 
     time.sleep(1)
 
-    # 시크릿 모드
     print("   🕵️ 시크릿 모드 진입...")
     d.click(0.92, 0.05) 
     time.sleep(2)
     
-    # 한국어 설정을 했으므로 '시크릿 모드 사용' 한글을 찾을 수도 있음
     text = read_screen_text(d)
     if "Secret" in text or "시크릿" in text or "Incognito" in text:
         d.click(0.5, 0.3) 
@@ -164,21 +163,14 @@ def run_android_monitoring():
                 cmd = f'am start -a android.intent.action.VIEW -d "https://www.youtube.com/results?search_query={keyword}" -p com.google.android.youtube'
                 d.shell(cmd)
                 
-                # 로딩 대기
                 time.sleep(8)
                 
-                # ★ 중요 수정: 스크롤하기 전에 먼저 찍는다! (최상단 광고 확인용)
-                screen_text_top = read_screen_text(d, filename=f"{keyword}_{i}_top.png")
+                # ★ 스크롤 전 캡처 (상단 광고용)
+                screen_text = read_screen_text(d, filename=f"{keyword}_{i}_top.png")
                 
-                # 그 다음 스크롤 (아래쪽 확인용)
+                # 스크롤
                 d.swipe(500, 1500, 500, 500, 0.3) 
                 time.sleep(2)
-                
-                # (옵션) 스크롤 후도 찍고 싶으면 여기서 한번 더 찍어도 됨
-                # screen_text_bottom = read_screen_text(d, filename=f"{keyword}_{i}_bottom.png")
-                # 일단은 위쪽 텍스트(screen_text_top)를 기준으로 판단
-                
-                screen_text = screen_text_top
                 
                 is_ad = "X"
                 ad_text = "-"
