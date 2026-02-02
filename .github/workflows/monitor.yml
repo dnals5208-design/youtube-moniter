@@ -43,26 +43,20 @@ jobs:
       uses: reactivecircus/android-emulator-runner@v2
       with:
         api-level: 29
+        # 구글 앱들이 포함된 이미지 (유튜브 이미 깔려있음)
         target: google_apis
         arch: x86_64
         profile: Nexus 6
         ram-size: 2048M
         heap-size: 512M
+        # 프록시 설정
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -http-proxy 127.0.0.1:8080
         
+        # ★ 수정됨: 설치 과정 삭제하고 바로 파이썬 실행
         script: |
-          echo "📥 GitHub Release에서 APK 다운로드 중..."
-          # ★ 핵심 변경: gh 명령어로 비공개 저장소 파일 다운로드
-          # (태그명 v1.0 / 파일명 youtube.apk 기준)
-          gh release download v1.0 -p "youtube.apk" --clobber
-          
-          echo "🔧 유튜브 APK 설치 중..."
-          adb install -r -d youtube.apk
-          
-          echo "🚀 파이썬 스크립트 실행"
+          echo "🚀 유튜브 앱이 이미 있으므로 바로 파이썬 실행합니다!"
           python main.py
       env:
-        # ★ 이 부분이 '열쇠'입니다. 비공개 저장소 접근 권한을 줍니다.
         GH_TOKEN: ${{ github.token }}
         G_SHEET_KEY: ${{ secrets.G_SHEET_KEY }}
         G_SHEET_ID: ${{ secrets.G_SHEET_ID }}
