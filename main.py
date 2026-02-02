@@ -18,7 +18,7 @@ REPEAT_COUNT = 10
 SCREENSHOT_DIR = "screenshots"
 
 # ==========================================
-# [기능] 구글 시트 연결 (초기화)
+# [기능] 구글 시트 연결 (무조건 초기화)
 # ==========================================
 def get_worksheet():
     try:
@@ -35,7 +35,7 @@ def get_worksheet():
         
         try:
             worksheet = sh.worksheet(sheet_name)
-            print(f"   ♻️ 기존 시트('{sheet_name}') 발견! 초기화합니다.")
+            print(f"   ♻️ 기존 시트('{sheet_name}') 발견! 내용을 초기화합니다.")
             worksheet.clear() 
             worksheet.append_row(header)
         except:
@@ -74,32 +74,44 @@ def read_screen_text(d, filename=None):
         return ""
 
 # ==========================================
-# [기능] IP 확인 (화면 없이 백그라운드 체크)
+# [기능] IP 확인 (크롬 + 연결 거부 감지)
 # ==========================================
-def check_ip_silent(d):
-    print("🌐 IP 위치 확인 중 (백그라운드 명령어)...")
+def check_ip_and_setup(d):
+    print("🌐 인터넷 및 IP 위치 확인 중...")
     
-    # 1. 네트워크 패치
+    # 네트워크 패치
     d.shell("settings put global captive_portal_mode 0")
     d.shell("settings put global private_dns_mode off")
     
-    # 2. Curl 명령어로 IP 정보 가져오기 (크롬 실행 안함)
-    try:
-        # 10초 타임아웃
-        output = d.shell("curl -s --connect-timeout 10 https://ipinfo.io/json").output
-        
-        # 로그에 전체 JSON 출력해서 눈으로 확인
-        print(f"   📄 IP 정보 응답: {output}")
-        
-        if "KR" in output or "Korea" in output:
-            print("   ✅ 한국 IP 확인됨! (Tunneling 정상)")
-        elif "US" in output:
-             print("   ⚠️ 미국 IP 잡힘 (프록시 실패 가능성)")
-        else:
-            print("   ⚠️ IP 국가 확인 불가 (응답 내용 확인 필요)")
-            
-    except Exception as e:
-        print(f"   ❌ IP 확인 명령어 실패: {e}")
+    # 크롬 실행
+    d.app_start("com.android.chrome")
+    time.sleep(5)
+    
+    # 팝업 닫기 (Accept, No Thanks 등)
+    d.click(0.5, 0.9) 
+    time.sleep(1)
+    d.click(0.2, 0.9) 
+    time.sleep(1)
+    if d(text="No thanks").exists:
+        d(text="No thanks").click()
+    
+    # IP 확인 사이트 접속
+    d.shell('am start -a android.intent.action.VIEW -d "https://ipinfo.io/json"')
+    time.sleep(10) 
+    
+    # 스크린샷 저장
+    screen_text = read_screen_text(d, filename="ip_check.png")
+    
+    # ★ 연결 거부(REFUSED) 감지
+    if "REFUSED" in screen_text or "reached" in screen_text:
+        print("\n🚨 [심각] SSH 터널 연결이 거부되었습니다!")
+        print("   -> 오라클 클라우드 방화벽(Security List) 문제일 확률 99%입니다.")
+        print("   -> 에뮬레이터가 프록시를 통과하지 못해 미국망을 사용 중입니다.\n")
+    
+    if "KR" in screen_text or "Korea" in screen_text or "South Korea" in screen_text:
+        print(f"   ✅ 한국 IP 확인됨! (내용: {screen_text[:30]}...)")
+    else:
+        print(f"   ⚠️ 한국 IP 아님 (내용: {screen_text[:30]}...)")
 
 # ==========================================
 # [기능] 유튜브 실행
@@ -110,7 +122,7 @@ def setup_youtube(d):
     d.app_start("com.google.android.youtube")
     time.sleep(8)
 
-    # 팝업 닫기 (좌표 클릭)
+    # 팝업 닫기
     d.click(0.5, 0.9) 
     time.sleep(1)
 
@@ -118,7 +130,6 @@ def setup_youtube(d):
     d.click(0.92, 0.05) 
     time.sleep(2)
     
-    # 메뉴 텍스트 확인
     text = read_screen_text(d)
     if "Secret" in text or "시크릿" in text or "Incognito" in text:
         d.click(0.5, 0.3) 
@@ -138,10 +149,7 @@ def run_android_monitoring():
         os.system("adb wait-for-device")
         d = u2.connect(ADB_ADDR)
         
-        # 1. 화면 없이 IP 체크
-        check_ip_silent(d)
-        
-        # 2. 유튜브 실행
+        check_ip_and_setup(d)
         setup_youtube(d)
 
         for keyword in KEYWORDS:
@@ -155,9 +163,9 @@ def run_android_monitoring():
                 cmd = f'am start -a android.intent.action.VIEW -d "https://www.youtube.com/results?search_query={keyword}" -p com.google.android.youtube'
                 d.shell(cmd)
                 
-                time.sleep(8)
+                time.sleep(10)
                 
-                # ★ 스크롤 전 캡처 (상단 광고용)
+                # 상단 캡처
                 screen_text = read_screen_text(d, filename=f"{keyword}_{i}_top.png")
                 
                 # 스크롤
