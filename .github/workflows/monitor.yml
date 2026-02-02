@@ -26,7 +26,7 @@ jobs:
       run: |
         pip install pandas uiautomator2 gspread oauth2client pytesseract Pillow
 
-    - name: Setup SSH Tunnel (Korea IP)
+    - name: Setup SSH Tunnel & Verify (Korea IP)
       env:
         ORACLE_KEY: ${{ secrets.ORACLE_KEY }}
         ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
@@ -35,7 +35,25 @@ jobs:
         mkdir -p ~/.ssh
         printf "%s\n" "$ORACLE_KEY" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
+        
+        # 1. SSH 터널 연결 (백그라운드)
+        echo "🔌 SSH 터널 연결 시도..."
         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -4 -D 8080 -f -C -N -i ~/.ssh/id_rsa $ORACLE_USER@$ORACLE_HOST -v
+        
+        # 2. 터널 안정화 대기
+        sleep 5
+        
+        # 3. ★ 핵심: 호스트에서 먼저 터널 테스트 (여기서 실패하면 아예 멈춤)
+        echo "🌐 터널링 연결 테스트 (Host)..."
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --socks5-hostname 127.0.0.1:8080 https://www.google.com)
+        
+        if [ "$HTTP_CODE" == "200" ]; then
+          echo "✅ 터널 연결 성공! (Google 접속 확인됨)"
+        else
+          echo "❌ 터널 연결 실패! (HTTP Code: $HTTP_CODE)"
+          echo "SSH 키나 아이디(ubuntu/opc)를 다시 확인해주세요."
+          exit 1
+        fi
 
     - name: Enable KVM
       run: |
@@ -52,11 +70,16 @@ jobs:
         profile: Nexus 6
         ram-size: 2048M
         heap-size: 512M
-        # ★ 수정됨: 한국어(ko-KR) 강제 설정 옵션 추가 (-prop ...)
+        # 한국어 설정(-prop) + 프록시 설정
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -dns-server 8.8.8.8 -no-snapshot-load -http-proxy 127.0.0.1:8080 -prop persist.sys.language=ko -prop persist.sys.country=KR
         
         script: |
-          echo "🚀 안드로이드(한국어) 부팅 완료. 파이썬 스크립트 실행!"
+          echo "🚀 안드로이드 부팅 완료. 한국어 강제 설정..."
+          # ★ ADB로 언어 강제 변경 (재부팅 없이 적용 시도)
+          adb shell settings put system system_locales ko-KR
+          adb shell setprop persist.sys.locale ko-KR
+          
+          echo "🚀 파이썬 스크립트 실행!"
           mkdir -p screenshots
           python -u main.py
 
