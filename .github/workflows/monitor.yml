@@ -51,9 +51,10 @@ jobs:
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -http-proxy 127.0.0.1:8080
         
         script: |
-          echo "📥 내 GitHub에서 유튜브 APK 다운로드 중..."
-          # ▼▼▼ 아래 주소를 선생님의 Release 링크로 꼭 수정하세요! ▼▼▼
-          wget -O youtube.apk "https://github.com/dnals5208-design/youtube-monitor/releases/download/v1.0/youtube.apk"
+          echo "📥 GitHub Release에서 APK 다운로드 중..."
+          # ★ 핵심 변경: gh 명령어로 비공개 저장소 파일 다운로드
+          # (태그명 v1.0 / 파일명 youtube.apk 기준)
+          gh release download v1.0 -p "youtube.apk" --clobber
           
           echo "🔧 유튜브 APK 설치 중..."
           adb install -r -d youtube.apk
@@ -61,5 +62,7 @@ jobs:
           echo "🚀 파이썬 스크립트 실행"
           python main.py
       env:
+        # ★ 이 부분이 '열쇠'입니다. 비공개 저장소 접근 권한을 줍니다.
+        GH_TOKEN: ${{ github.token }}
         G_SHEET_KEY: ${{ secrets.G_SHEET_KEY }}
         G_SHEET_ID: ${{ secrets.G_SHEET_ID }}
