@@ -17,9 +17,16 @@ jobs:
       with:
         python-version: '3.10'
 
+    # ★ 핵심 추가: 리눅스에 한글 인식 가능한 OCR 도구 설치
+    - name: Install System Dependencies (OCR)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y tesseract-ocr tesseract-ocr-kor libtesseract-dev
+
     - name: Install Libraries
       run: |
-        pip install pandas uiautomator2 gspread oauth2client
+        # pytesseract (OCR 파이썬 연결책) 추가
+        pip install pandas uiautomator2 gspread oauth2client pytesseract Pillow
 
     - name: Setup SSH Tunnel (Korea IP)
       env:
@@ -28,13 +35,8 @@ jobs:
         ORACLE_USER: ${{ secrets.ORACLE_USER }}
       run: |
         mkdir -p ~/.ssh
-        
-        # ★ 핵심 수정: printf로 키 파일 생성 (줄바꿈 보존)
         printf "%s\n" "$ORACLE_KEY" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
-        
-        # ★ 핵심 수정: 보안 경고 무시하고 강제 접속 (-o StrictHostKeyChecking=no)
-        # 255 에러 원천 차단
         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -4 -D 8080 -f -C -N -i ~/.ssh/id_rsa $ORACLE_USER@$ORACLE_HOST -v
 
     - name: Enable KVM
@@ -46,15 +48,12 @@ jobs:
     - name: Run Android Emulator & Script
       uses: reactivecircus/android-emulator-runner@v2
       with:
-        # 최신 안드로이드 13 (유튜브 앱 최신버전)
         api-level: 33
         target: google_apis
         arch: x86_64
-        # 호환성 좋은 Nexus 6
         profile: Nexus 6
         ram-size: 2048M
         heap-size: 512M
-        # DNS 강제 설정(8.8.8.8)으로 인터넷 연결 보장
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -dns-server 8.8.8.8 -no-snapshot-load -http-proxy 127.0.0.1:8080
         
         script: |
