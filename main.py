@@ -15,7 +15,7 @@ KEYWORDS = ["해커스", "토익", "경찰공무원", "소방공무원", "공무
 REPEAT_COUNT = 10 
 
 # ==========================================
-# [기능] 구글 시트 연결
+# [기능] 구글 시트 연결 (초기화 포함)
 # ==========================================
 def get_worksheet():
     try:
@@ -28,13 +28,18 @@ def get_worksheet():
         
         now = datetime.now()
         sheet_name = f"{now.year % 100}.{now.month}/{now.day}"
+        header = ["날짜", "시간", "키워드", "회차", "광고여부", "비고"]
         
         try:
             worksheet = sh.worksheet(sheet_name)
-        except:
-            worksheet = sh.add_worksheet(title=sheet_name, rows="1000", cols="20")
-            header = ["날짜", "시간", "키워드", "회차", "광고여부", "비고"]
+            print(f"   ♻️ 기존 시트('{sheet_name}') 발견! 초기화합니다.")
+            worksheet.clear() 
             worksheet.append_row(header)
+        except:
+            print(f"   🆕 새 시트('{sheet_name}')를 생성합니다.")
+            worksheet = sh.add_worksheet(title=sheet_name, rows="1000", cols="20")
+            worksheet.append_row(header)
+            
         return worksheet
     except Exception as e:
         print(f"❌ 구글 시트 연결 실패: {e}")
@@ -50,55 +55,70 @@ def append_to_sheet(worksheet, data):
             print(f"   ⚠️ 시트 저장 실패: {e}")
 
 # ==========================================
-# [기능] 유튜브 제어
+# [기능] 유튜브 제어 (Watcher 제거 -> 직접 확인)
 # ==========================================
 def handle_popups_and_incognito(d):
-    print("   🔨 초기 설정(시크릿모드) 진행 중...")
+    print("   🔨 초기 설정(팝업제거/시크릿모드) 진행 중...")
     
-    # 팝업 닫기 (빠르게)
-    d.watcher("POPUP").when(text="Don't allow").click(text="Don't allow")
-    d.watcher("POPUP2").when(text="허용 안함").click(text="허용 안함")
-    d.watcher("POPUP3").when(text="Got it").click(text="Got it")
-    d.watcher.start() # 감시 시작
-    
-    time.sleep(3)
+    # 1. 팝업 닫기 (단순 무식하게 직접 확인 - 가장 확실함)
+    # 3번 정도 반복해서 혹시 늦게 뜨는 팝업도 잡음
+    for _ in range(3):
+        if d(text="Don't allow").exists:
+            d(text="Don't allow").click()
+            print("   -> 알림 거부 클릭")
+        if d(text="허용 안함").exists:
+            d(text="허용 안함").click()
+        if d(text="Got it").exists:
+            d(text="Got it").click()
+        time.sleep(1)
 
-    # 시크릿 모드 진입
+    # 2. 시크릿 모드 진입
     print("   🕵️ 시크릿 모드 진입...")
-    # 좌표로 누르는 게 가장 빠르고 정확함 (우측 상단 프로필)
+    
+    # 프로필 클릭 (좌표가 가장 빠름 - 우측 상단)
     d.click(0.92, 0.05) 
     time.sleep(2)
     
-    # '시크릿 모드 사용' 텍스트 찾기
+    # 시크릿 모드 메뉴 클릭
     if d(text="Turn on Incognito").exists:
         d(text="Turn on Incognito").click()
     elif d(text="시크릿 모드 사용").exists:
         d(text="시크릿 모드 사용").click()
     elif d(resourceId="com.google.android.youtube:id/incognito_item").exists:
         d(resourceId="com.google.android.youtube:id/incognito_item").click()
+    else:
+        # 혹시 메뉴가 안 열렸으면 다시 시도
+        d.click(0.92, 0.05)
+        time.sleep(1)
+        if d(resourceId="com.google.android.youtube:id/incognito_item").exists:
+             d(resourceId="com.google.android.youtube:id/incognito_item").click()
     
     time.sleep(3)
-    d.watcher.stop() # 감시 종료
+    
+    # 시크릿 모드 진입 후 'Got it' 팝업 한 번 더 체크
+    if d(text="Got it").exists: d(text="Got it").click()
+    
     print("   ✅ 설정 완료")
 
 def run_android_monitoring():
+    # 1. 시트 준비
     ws = get_worksheet()
+    
     print(f"📱 [MO] 에뮬레이터 연결...")
-
     try:
         os.system("adb wait-for-device")
         d = u2.connect(ADB_ADDR)
         
-        # 1. 유튜브 실행 (기존 앱 종료 후 깔끔하게 시작)
+        # 2. 앱 실행
         print("   -> 🔴 YouTube APP 실행")
         d.app_stop("com.google.android.youtube")
         d.app_start("com.google.android.youtube")
-        time.sleep(10) # 앱 로딩 대기 (15초 -> 10초 단축)
+        time.sleep(10) 
         
-        # 2. 시크릿 모드 (IP 체크 삭제함)
+        # 3. 설정 진행
         handle_popups_and_incognito(d)
 
-        # 3. 키워드 검색 반복
+        # 4. 검색 반복
         for keyword in KEYWORDS:
             print(f"\n🔎 [{keyword}] 검색 시작")
             
@@ -106,7 +126,7 @@ def run_android_monitoring():
                 sys.stdout.flush()
                 print(f"   [{i}/{REPEAT_COUNT}] 진행 중...", end=" ")
                 
-                # 돋보기 클릭 (좌표가 제일 빠름)
+                # 돋보기 클릭 (검색창이 없으면 클릭)
                 if not d(resourceId="com.google.android.youtube:id/search_edit_text").exists:
                     d.click(0.9, 0.05)
                     time.sleep(1)
@@ -115,20 +135,19 @@ def run_android_monitoring():
                 d.send_keys(keyword)
                 d.press("enter")
                 
-                # ★ 로딩 대기 (프록시 고려 10초)
+                # 로딩 대기
                 time.sleep(10)
                 
-                # 스크롤 (광고 로딩 유도)
+                # 스크롤
                 d.swipe(500, 1500, 500, 500, 0.3) 
                 time.sleep(2)
                 
-                # 화면 분석 (에러 방지 처리 추가)
+                # 화면 분석
                 is_ad = "X"
                 ad_text = "-"
                 
                 try:
-                    xml = d.dump_hierarchy() # 여기서 에러나면 무시하고 다음으로 넘어감
-                    
+                    xml = d.dump_hierarchy()
                     if 'text="광고"' in xml or 'text="Ad"' in xml or 'text="Sponsored"' in xml:
                         is_ad = "O"
                         lines = [line.split('"')[0] for line in xml.split('text="') if '"' in line]
@@ -142,9 +161,9 @@ def run_android_monitoring():
                     else:
                         print(f"❌ 없음")
                 except Exception as xml_e:
-                    print(f"⚠️ 화면 읽기 실패(넘어감): {xml_e}")
+                    print(f"⚠️ 화면 읽기 실패(넘어감)")
                 
-                # 시트 저장
+                # 결과 저장
                 result_data = {
                     "날짜": datetime.now().strftime('%Y-%m-%d'),
                     "시간": datetime.now().strftime('%H:%M:%S'),
@@ -155,17 +174,15 @@ def run_android_monitoring():
                 }
                 append_to_sheet(ws, result_data)
                 
-                # 다음 검색을 위해 검색창 비우기 (뒤로가기 대신 X버튼 누르거나 전체선택 삭제)
-                # 검색창이 활성화된 상태면 X버튼이 있음
+                # 검색창 비우기 (다음 검색 준비)
                 if d(description="Clear search query").exists:
                     d(description="Clear search query").click()
                 elif d(resourceId="com.google.android.youtube:id/search_clear").exists:
                     d(resourceId="com.google.android.youtube:id/search_clear").click()
                 else:
-                    # 없으면 돋보기 다시 눌러서 검색창 진입
                     d.click(0.9, 0.05)
                     time.sleep(1)
-                    d.clear_text() # 텍스트 지우기
+                    d.clear_text()
 
     except Exception as e:
         print(f"에러 발생: {e}")
