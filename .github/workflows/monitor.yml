@@ -1,9 +1,9 @@
-name: Oracle Proxy Monitor
+name: Real App Monitor
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '30 5 * * *' # 한국시간 14:30
+    - cron: '30 5 * * *' # 한국 14:30
 
 jobs:
   monitor:
@@ -18,7 +18,6 @@ jobs:
         python-version: '3.10'
 
     - name: Install Libraries
-      # ★ gspread, oauth2client 추가됨
       run: |
         pip install pandas uiautomator2 gspread oauth2client
 
@@ -44,12 +43,28 @@ jobs:
       uses: reactivecircus/android-emulator-runner@v2
       with:
         api-level: 29
-        target: default
+        # ★ 핵심 변경: 구글 플레이 서비스가 포함된 이미지 사용
+        target: google_apis
         arch: x86_64
         profile: Nexus 6
+        # 램을 좀 넉넉하게 줌
+        ram-size: 2048M
+        # 힙 사이즈도 늘림
+        heap-size: 512M
+        # 프록시 설정
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -http-proxy 127.0.0.1:8080
-        # ★ 파이썬 스크립트에 구글 시트 정보를 환경변수로 넘겨줌
-        script: python main.py
+        
+        # ★ 유튜브 앱 다운로드 및 설치 후 파이썬 실행
+        script: |
+          echo "📥 유튜브 APK 다운로드 중..."
+          # x86_64 에뮬레이터 호환 유튜브 APK 다운로드 (APKMirror 등에서 안정적인 버전 링크 사용)
+          wget -O youtube.apk "https://d.apkpure.com/b/APK/com.google.android.youtube?version=latest" --user-agent="Mozilla/5.0"
+          
+          echo "🔧 유튜브 APK 설치 중..."
+          adb install -r -d youtube.apk
+          
+          echo "🚀 파이썬 스크립트 실행"
+          python main.py
       env:
         G_SHEET_KEY: ${{ secrets.G_SHEET_KEY }}
         G_SHEET_ID: ${{ secrets.G_SHEET_ID }}
