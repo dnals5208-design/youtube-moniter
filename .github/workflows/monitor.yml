@@ -17,7 +17,7 @@ jobs:
       with:
         python-version: '3.10'
 
-    - name: Install System Dependencies (OCR)
+    - name: Install System Dependencies (OCR & Tools)
       run: |
         sudo apt-get update
         sudo apt-get install -y tesseract-ocr tesseract-ocr-kor libtesseract-dev net-tools
@@ -26,40 +26,43 @@ jobs:
       run: |
         pip install pandas uiautomator2 gspread oauth2client pytesseract Pillow
 
-    - name: Setup SSH Tunnel & Health Check (Korea IP)
+    - name: Setup SSH Tunnel (Auto-Detect User)
       env:
         ORACLE_KEY: ${{ secrets.ORACLE_KEY }}
         ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
-        ORACLE_USER: ${{ secrets.ORACLE_USER }}
       run: |
         mkdir -p ~/.ssh
         printf "%s\n" "$ORACLE_KEY" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
         
-        echo "🔌 SSH 터널 연결 시도... (ID: $ORACLE_USER)"
-        # -v: 로그 상세 출력, ServerAliveInterval: 연결 유지 설정
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=60 -4 -D 8080 -f -C -N -i ~/.ssh/id_rsa $ORACLE_USER@$ORACLE_HOST -v
-        
-        echo "⏳ 터널 안정화 대기 (10초)..."
-        sleep 10
-        
-        echo "🔍 포트 8080 확인 중..."
-        if ! netstat -tulpn | grep :8080; then
-          echo "❌ [치명적 오류] SSH 터널이 시작되자마자 죽었습니다!"
-          echo "원인 1: 오라클 클라우드 방화벽(Security List)에서 포트가 막힘."
-          echo "원인 2: 오라클 아이디($ORACLE_USER)가 틀림 (opc vs ubuntu)."
-          exit 1
-        fi
-        
-        echo "🌐 터널링 실제 접속 테스트 (Google via Proxy)..."
-        # 실제로 데이터를 보내봅니다. 여기서 막히면 방화벽 문제입니다.
-        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --socks5-hostname 127.0.0.1:8080 https://www.google.com || echo "FAIL")
-        
-        if [ "$HTTP_CODE" == "200" ]; then
-          echo "✅ 터널 연결 100% 성공! (Google 접속 됨)"
+        # 함수: 터널 연결 시도
+        connect_tunnel() {
+          USER=$1
+          echo "🔌 접속 시도: $USER@$ORACLE_HOST ..."
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -4 -D 8080 -f -C -N -i ~/.ssh/id_rsa $USER@$ORACLE_HOST
+          sleep 5
+          # 연결 확인 (구글 접속 테스트)
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --socks5-hostname 127.0.0.1:8080 --connect-timeout 5 https://www.google.com || echo "FAIL")
+          if [ "$HTTP_CODE" == "200" ]; then
+            echo "✅ 성공! 아이디는 '$USER' 였습니다."
+            return 0
+          else
+            echo "❌ 실패 (응답코드: $HTTP_CODE)"
+            # 실패 시 백그라운드 ssh 프로세스 정리
+            pkill ssh || true
+            return 1
+          fi
+        }
+
+        # 1. ubuntu로 시도
+        if connect_tunnel "ubuntu"; then
+          echo "TUNNEL_READY=true" >> $GITHUB_ENV
+        # 2. 실패하면 opc로 시도
+        elif connect_tunnel "opc"; then
+          echo "TUNNEL_READY=true" >> $GITHUB_ENV
         else
-          echo "❌ 터널 연결 실패! (Curl 결과: $HTTP_CODE)"
-          echo "오라클 방화벽 설정을 꼭 확인해주세요."
+          echo "❌ [치명적 오류] ubuntu, opc 둘 다 접속 실패!"
+          echo "SSH Key가 잘못되었거나, 오라클 인스턴스가 꺼져있을 수 있습니다."
           exit 1
         fi
 
@@ -78,8 +81,7 @@ jobs:
         profile: Nexus 6
         ram-size: 2048M
         heap-size: 512M
-        # ★ 수정됨: 한국어 강제 설정 (-prop) + 프록시 설정
-        # adb shell setprop 대신 부팅 옵션으로 넣어서 권한 문제 해결
+        # 한국어 강제 설정 + 프록시 연결
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -dns-server 8.8.8.8 -no-snapshot-load -http-proxy 127.0.0.1:8080 -prop persist.sys.language=ko -prop persist.sys.country=KR -prop persist.sys.locale=ko-KR
         
         script: |
