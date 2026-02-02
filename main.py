@@ -6,8 +6,8 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import sys
-import pytesseract # OCR 라이브러리
-from PIL import Image # 이미지 처리
+import pytesseract
+from PIL import Image
 
 # ==========================================
 # [설정]
@@ -35,7 +35,6 @@ def get_worksheet():
         try:
             worksheet = sh.worksheet(sheet_name)
         except:
-            print(f"   🆕 새 시트('{sheet_name}')를 생성합니다.")
             worksheet = sh.add_worksheet(title=sheet_name, rows="1000", cols="20")
             worksheet.append_row(header)
         return worksheet
@@ -66,17 +65,12 @@ def fix_network_settings(d):
     print("   ✅ 네트워크 패치 완료")
 
 # ==========================================
-# [기능] OCR (화면 캡처해서 글자 읽기) - 핵심!
+# [기능] OCR (화면 읽기)
 # ==========================================
 def read_screen_text(d):
     try:
-        # 스크린샷 찍어서 파일로 저장
         d.screenshot("current_screen.png")
-        
-        # 저장된 이미지를 읽어서 텍스트로 변환 (한글+영어)
         text = pytesseract.image_to_string(Image.open("current_screen.png"), lang='kor+eng')
-        
-        # 줄바꿈 제거하고 한 줄로 정리
         clean_text = " ".join(text.split())
         return clean_text
     except Exception as e:
@@ -84,112 +78,120 @@ def read_screen_text(d):
         return ""
 
 # ==========================================
-# [기능] 인터넷 연결 확인 (OCR 방식)
+# [기능] 인터넷/IP 확인 (IP 위치 출력 추가)
 # ==========================================
 def check_internet_via_browser(d):
-    print("🌐 인터넷 연결 확인 중 (OCR 모드)...")
+    print("🌐 인터넷 및 IP 위치 확인 중...")
     fix_network_settings(d)
     
     d.app_start("com.android.chrome")
     time.sleep(3)
-    d.shell('am start -a android.intent.action.VIEW -d "https://ipinfo.io"')
-    time.sleep(10) 
+    # ipinfo.io로 접속해서 국가코드 확인
+    d.shell('am start -a android.intent.action.VIEW -d "https://ipinfo.io/json"')
+    time.sleep(8) 
     
     screen_text = read_screen_text(d)
     
     if "No internet" in screen_text or "ERR_" in screen_text:
-         print("   ❌ 인터넷 연결 실패 (크롬 에러 화면)")
+         print("   ❌ 인터넷 연결 실패")
          return False
     
-    print(f"   ✅ 인터넷 연결 확인됨 (화면 텍스트 일부: {screen_text[:30]}...)")
+    # 국가 코드 확인
+    if "KR" in screen_text or "Korea" in screen_text:
+        print(f"   ✅ 한국 IP 확인됨! (OCR 내용: {screen_text[:30]}...)")
+    else:
+        print(f"   ⚠️ 한국 IP 아닐 수 있음 (OCR 내용: {screen_text[:30]}...)")
+        
     return True
 
 # ==========================================
-# [기능] 유튜브 제어
+# [기능] 유튜브 실행 및 설정
 # ==========================================
-def handle_popups_and_incognito(d):
-    print("   🔨 초기 설정 진행 중...")
-    # 좌표로 팝업 닫기 시도 (중앙 하단, 중앙 등)
-    d.click(0.5, 0.9) # Got it 위치 추정
-    time.sleep(1)
+def setup_youtube(d):
+    print("   🔨 유튜브 초기 설정...")
     
-    print("   🕵️ 시크릿 모드 진입...")
+    # 딥링크로 일단 유튜브를 한 번 켬
+    d.shell('am start -a android.intent.action.VIEW -d "https://www.youtube.com" -p com.google.android.youtube')
+    time.sleep(10)
+
+    # 팝업 대충 닫기 (좌표)
+    d.click(0.5, 0.9) # Got it / Skip
+    time.sleep(1)
+    d.click(0.5, 0.8) # No thanks
+    time.sleep(1)
+
+    print("   🕵️ 시크릿 모드 진입 시도...")
     d.click(0.92, 0.05) # 프로필
     time.sleep(2)
     
-    # OCR로 메뉴 찾기 (좌표 클릭 시도)
+    # OCR로 메뉴 확인
     text = read_screen_text(d)
     if "Secret" in text or "시크릿" in text or "Incognito" in text:
-        # 메뉴가 떴으면 적당한 위치 클릭 (목록 중 하나겠거니 하고 좌표 클릭)
-        # 보통 시크릿 모드는 상단부에 있음
-        d.click(0.5, 0.3) 
+        d.click(0.5, 0.3) # 대략적 위치
     else:
-        # 안 떴으면 그냥 프로필 다시 누르고 좌표로 찍음
         d.click(0.92, 0.05)
         time.sleep(1)
-        d.click(0.5, 0.35) # 대략적인 시크릿모드 메뉴 위치
+        d.click(0.5, 0.35) 
     
     time.sleep(4)
-    d.click(0.5, 0.9) # Got it 닫기
-    print("   ✅ 설정 완료 (좌표 기반)")
+    d.click(0.5, 0.9) # Got it
+    print("   ✅ 설정 완료")
 
 def run_android_monitoring():
     ws = get_worksheet()
-    print(f"📱 [MO] 에뮬레이터 연결 (Android 13 + OCR)...")
+    print(f"📱 [MO] 에뮬레이터 연결...")
 
     try:
         os.system("adb wait-for-device")
         d = u2.connect(ADB_ADDR)
         
+        # 1. 인터넷 & IP 확인
         check_internet_via_browser(d)
         
-        print("   -> 🔴 YouTube APP 실행")
-        d.app_stop("com.google.android.youtube")
-        d.app_start("com.google.android.youtube")
-        time.sleep(10) 
-        
-        handle_popups_and_incognito(d)
+        # 2. 유튜브 켜고 시크릿 모드
+        setup_youtube(d)
 
         for keyword in KEYWORDS:
-            print(f"\n🔎 [{keyword}] 검색 시작")
+            print(f"\n🔎 [{keyword}] 검색 시작 (딥링크 방식)")
             
             for i in range(1, REPEAT_COUNT + 1):
                 sys.stdout.flush()
                 print(f"   [{i}/{REPEAT_COUNT}] 진행 중...", end=" ")
                 
-                # 1. 돋보기 클릭 (좌표)
-                d.click(0.9, 0.05) 
-                time.sleep(2)
+                # ★ 핵심 변경: 딥링크로 검색 결과 페이지 강제 이동
+                # 앱이 꺼져있든 켜져있든 상관없이 바로 검색 결과로 점프함
+                # 뒤로가기 누를 필요 없음
+                cmd = f'am start -a android.intent.action.VIEW -d "https://www.youtube.com/results?search_query={keyword}" -p com.google.android.youtube'
+                d.shell(cmd)
                 
-                # 2. 검색어 입력
-                d.send_keys(keyword)
-                d.press("enter")
-                
-                # 3. 로딩 대기
+                # 로딩 대기
                 time.sleep(10)
+                
+                # 스크롤 (광고 로딩 유도)
                 d.swipe(500, 1500, 500, 500, 0.3) 
                 time.sleep(3)
                 
-                # 4. ★ OCR로 화면 분석
+                # OCR로 화면 분석
                 screen_text = read_screen_text(d)
                 
                 is_ad = "X"
                 ad_text = "-"
                 
-                # 텍스트에서 광고 키워드 찾기
-                if "광고" in screen_text or "Ad" in screen_text or "Sponsored" in screen_text:
+                # 바탕화면으로 튕겼는지 확인 (Settings, Clock 등이 보이면 튕긴 것)
+                if "Settings" in screen_text and "Clock" in screen_text:
+                     print("   ⚠️ 바탕화면으로 튕김 -> 다음 루프에서 재진입")
+                     # 재진입을 위해 아무것도 안 하고 넘어감 (다음 딥링크가 해결해줌)
+                
+                elif "광고" in screen_text or "Ad" in screen_text or "Sponsored" in screen_text:
                     is_ad = "O"
-                    ad_text = "광고 발견 (OCR 인식)"
-                    
-                    # 광고주 찾기
-                    for k in ["해커스", "에듀윌", "공단기", "메가", "경단기", "소방", "야나두", "시원스쿨", "YBM"]:
+                    ad_text = "광고 발견"
+                    for k in ["해커스", "에듀윌", "공단기", "메가", "경단기", "소방", "야나두", "시원스쿨", "YBM", "Hackers"]:
                         if k in screen_text:
                             ad_text = f"{k} 광고"
                             break
                     print(f"🚨 발견! ({ad_text})")
                 else:
-                    # 디버깅용: 읽은 글자 앞부분만 출력
-                    print(f"❌ 없음 (OCR 인식내용: {screen_text[:40]}...)")
+                    print(f"❌ 없음 (인식: {screen_text[:30]}...)")
                 
                 result_data = {
                     "날짜": datetime.now().strftime('%Y-%m-%d'),
@@ -201,13 +203,8 @@ def run_android_monitoring():
                 }
                 append_to_sheet(ws, result_data)
                 
-                # 5. 초기화 (뒤로가기)
-                d.press("back")
+                # 뒤로가기 로직 삭제함 (딥링크가 알아서 처리)
                 time.sleep(1)
-                d.press("back")
-                time.sleep(2)
-                # 검색창 남아있으면 한번 더
-                d.press("back") 
 
     except Exception as e:
         print(f"에러 발생: {e}")
