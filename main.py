@@ -6,7 +6,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import sys
-import re # 정규표현식 추가 (화면 분석 강화)
+import re
 
 # ==========================================
 # [설정]
@@ -55,24 +55,44 @@ def append_to_sheet(worksheet, data):
             print(f"   ⚠️ 시트 저장 실패: {e}")
 
 # ==========================================
+# [기능] 인터넷 연결 확인 (NEW)
+# ==========================================
+def wait_for_internet_connection():
+    print("🌐 에뮬레이터 인터넷 연결 확인 중...")
+    timeout = 180 # 3분 타임아웃
+    start_time = time.time()
+    
+    while time.time() - start_time < timeout:
+        # 구글 DNS(8.8.8.8)로 핑 테스트
+        # 0이 반환되면 성공, 아니면 실패
+        response = os.system("adb shell ping -c 1 -W 2 8.8.8.8 > /dev/null 2>&1")
+        
+        if response == 0:
+            print("   ✅ 인터넷 연결 성공! (작업 시작)")
+            return True
+        
+        print("   ... 연결 대기 중 (DNS/터널링 확인)")
+        time.sleep(5)
+    
+    print("❌ 인터넷 연결 실패 (시간 초과) - 오라클 서버 상태를 확인하세요.")
+    return False
+
+# ==========================================
 # [기능] 유튜브 제어
 # ==========================================
 def handle_popups_and_incognito(d):
     print("   🔨 초기 설정 진행 중...")
     
-    # 팝업 닫기
     for _ in range(3):
         if d(text="Don't allow").exists: d(text="Don't allow").click()
         if d(text="허용 안함").exists: d(text="허용 안함").click()
         if d(text="Got it").exists: d(text="Got it").click()
         time.sleep(1)
 
-    # 시크릿 모드 진입
     print("   🕵️ 시크릿 모드 진입...")
-    d.click(0.92, 0.05) # 우측 상단 프로필
+    d.click(0.92, 0.05) 
     time.sleep(2)
     
-    # 메뉴 찾기 (text와 content-desc 모두 확인)
     if d(text="Turn on Incognito").exists:
         d(text="Turn on Incognito").click()
     elif d(text="시크릿 모드 사용").exists:
@@ -80,7 +100,6 @@ def handle_popups_and_incognito(d):
     elif d(resourceId="com.google.android.youtube:id/incognito_item").exists:
         d(resourceId="com.google.android.youtube:id/incognito_item").click()
     else:
-        # 메뉴가 안 떴으면 한 번 더 시도
         d.click(0.92, 0.05)
         time.sleep(1)
         if d(resourceId="com.google.android.youtube:id/incognito_item").exists:
@@ -91,14 +110,21 @@ def handle_popups_and_incognito(d):
     print("   ✅ 설정 완료")
 
 def run_android_monitoring():
-    ws = get_worksheet()
-    print(f"📱 [MO] 에뮬레이터 연결 (Android 13)...")
+    # 0. 안드로이드 대기
+    print("📱 안드로이드 부팅 대기...")
+    os.system("adb wait-for-device")
 
+    # ★ 1. 인터넷 연결 확인 (여기서 연결 안 되면 종료)
+    if not wait_for_internet_connection():
+        return
+
+    # 2. 시트 준비
+    ws = get_worksheet()
+    
+    print(f"📱 [MO] 에뮬레이터 연결 (Android 13)...")
     try:
-        os.system("adb wait-for-device")
         d = u2.connect(ADB_ADDR)
         
-        # 앱 실행
         print("   -> 🔴 YouTube APP 실행")
         d.app_stop("com.google.android.youtube")
         d.app_start("com.google.android.youtube")
@@ -113,35 +139,27 @@ def run_android_monitoring():
                 sys.stdout.flush()
                 print(f"   [{i}/{REPEAT_COUNT}] 진행 중...", end=" ")
                 
-                # 1. 검색창 진입 (돋보기 클릭)
-                # (뒤로가기로 초기화했으므로 항상 홈 화면 상태라고 가정)
+                # 검색창 진입
                 if not d(resourceId="com.google.android.youtube:id/search_edit_text").exists:
-                    d.click(0.9, 0.05) # 우측 상단 돋보기 위치 클릭
+                    d.click(0.9, 0.05) 
                     time.sleep(2)
                 
-                # 2. 검색어 입력
                 d.send_keys(keyword)
                 d.press("enter")
                 
-                # 3. 로딩 대기
+                # 로딩 대기
                 time.sleep(10)
-                
-                # 4. 스크롤 (광고 로딩 유도)
                 d.swipe(500, 1500, 500, 500, 0.3) 
                 time.sleep(2)
                 
-                # 5. 화면 분석 (강화된 로직)
+                # 화면 분석
                 is_ad = "X"
                 ad_text = "-"
                 
                 try:
                     xml = d.dump_hierarchy()
-                    
-                    # '광고', 'Ad', 'Sponsored' 키워드 찾기 (text 및 content-desc 모두 검색)
-                    # 정규표현식으로 text="..." 또는 content-desc="..." 안의 내용을 추출
                     texts_found = re.findall(r'(?:text|content-desc)="([^"]*)"', xml)
                     
-                    # 광고 배지 확인
                     ad_badge_found = False
                     for t in texts_found:
                         if t in ["광고", "Ad", "Sponsored", "이 광고", "앱 설치"]:
@@ -150,9 +168,7 @@ def run_android_monitoring():
                     
                     if ad_badge_found:
                         is_ad = "O"
-                        # 광고주 찾기 (해커스 등 키워드 포함된 텍스트 탐색)
                         for t in texts_found:
-                            # 광고주 텍스트 조건: 길이가 적당하고, '광고' 단어가 아니고, 타임스탬프가 아님
                             if len(t) > 1 and "광고" not in t and "분 전" not in t and "조회수" not in t:
                                  if any(k in t for k in ["해커스", "에듀윌", "공단기", "메가", "경단기", "소방", "야나두", "시원스쿨", "YBM"]):
                                      ad_text = t
@@ -160,14 +176,13 @@ def run_android_monitoring():
                         if ad_text == "-": ad_text = "광고발견(상세미상)"
                         print(f"🚨 발견! ({ad_text})")
                     else:
-                        # 디버깅: 화면에 보이는 주요 텍스트 5개만 출력해봄
                         summary = ", ".join([t for t in texts_found if len(t) > 3][:5])
                         print(f"❌ 없음 (화면: {summary}...)")
 
                 except Exception as xml_e:
                     print(f"⚠️ 화면 읽기 실패: {xml_e}")
                 
-                # 6. 결과 저장
+                # 저장
                 result_data = {
                     "날짜": datetime.now().strftime('%Y-%m-%d'),
                     "시간": datetime.now().strftime('%H:%M:%S'),
@@ -178,14 +193,11 @@ def run_android_monitoring():
                 }
                 append_to_sheet(ws, result_data)
                 
-                # 7. ★ 중요: 초기화 (뒤로가기 전략)
-                # clear_text() 대신 뒤로가기를 연타하여 검색 모드를 빠져나감
-                d.press("back") # 키보드 내리기 / 검색창 닫기
+                # 초기화 (뒤로가기)
+                d.press("back")
                 time.sleep(1)
-                d.press("back") # 검색 결과창 나가기 (홈으로 복귀)
+                d.press("back")
                 time.sleep(2)
-                
-                # 만약 홈으로 안 갔을까봐 한 번 더 체크 (검색창이 여전히 있으면 뒤로가기)
                 if d(resourceId="com.google.android.youtube:id/search_edit_text").exists:
                      d.press("back")
                      time.sleep(1)
