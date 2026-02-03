@@ -37,12 +37,14 @@ jobs:
         chmod 600 ~/.ssh/id_rsa
         
         echo "🔌 SSH 터널 연결 (0.0.0.0 바인딩)..."
+        # -D 0.0.0.0:8080 : 모든 인터페이스에서 접속 허용
         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ExitOnForwardFailure=yes -4 -D 0.0.0.0:8080 -f -C -N -i ~/.ssh/id_rsa $ORACLE_USER@$ORACLE_HOST
         sleep 5
 
-    - name: 🛡️ [진단] 호스트 IP 확인
+    - name: 🛡️ [진단] 호스트 IP 확인 (필수 과정)
       run: |
         echo "🌐 GitHub 호스트 IP 검사..."
+        # 로컬 포트(8080)를 통해 외부 IP 확인. 여기서 KR이 떠야 함.
         PROXY_IP=$(curl -s --socks5 127.0.0.1:8080 https://ipinfo.io/json)
         echo "   👉 터널 IP 정보: $PROXY_IP"
         
@@ -50,6 +52,8 @@ jobs:
           echo "✅ [호스트 성공] 서버 터널 정상! 한국 IP입니다."
         else
           echo "❌ [호스트 실패] 터널 IP가 한국이 아닙니다."
+          # 호스트가 실패하면 에뮬레이터도 실패하므로 여기서 멈추는 게 맞음
+          exit 1
         fi
 
     - name: Enable KVM
@@ -61,29 +65,39 @@ jobs:
     - name: Run Android Emulator & Script
       uses: reactivecircus/android-emulator-runner@v2
       with:
-        # ★ [핵심] API 28 (Android 9 Pie) : 가장 가볍고 안정적임
-        api-level: 28
-        target: default
+        # ★ [핵심 1] API 29 (Android 10): 프록시 호환성 최적 (Google DNS 강제 사용 안 함)
+        api-level: 29
+        
+        # ★ [핵심 2] google_apis: 유튜브/크롬 앱이 포함된 이미지 (default 아님!)
+        target: google_apis
+        
         arch: x86_64
         profile: Nexus 6
         ram-size: 2048M
         heap-size: 512M
-        # 프록시 설정 유지
+        
+        # ★ [핵심 3] DNS 옵션 삭제 & SOCKS5 명시
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-load -http-proxy socks5://127.0.0.1:8080 -prop persist.sys.language=ko -prop persist.sys.country=KR -prop persist.sys.locale=ko-KR
         
         script: |
-          echo "🚀 안드로이드(API 28) 부팅 완료."
+          echo "🚀 안드로이드(API 29 Google) 부팅 완료."
           
-          echo "💤 시스템 안정화 대기 (60초)..."
+          echo "💤 앱 초기화 대기 (60초)..."
+          # 구글 서비스가 업데이트되고 실행되는 시간을 줍니다.
           sleep 60
           
-          echo "🔓 화면 깨우기 & 잠금 해제 시도..."
-          adb shell input keyevent 82
+          echo "🔓 화면 깨우기 (잠금 해제)..."
+          # 메뉴 키 -> 홈 키로 화면을 깨웁니다.
           adb shell input keyevent 82
           adb shell input keyevent 3
-          sleep 5
           
-          echo "🏃‍♂️ 스크립트 실행!"
+          echo "🌐 에뮬레이터 내부 인터넷 연결 확인 (Google 접속)..."
+          # Ping 대신 http 접속 시도 (SOCKS5는 Ping 안됨)
+          # '200' 또는 '301' 코드가 나오면 인터넷 되는 것임
+          # (Android 10에는 curl이 없을 수 있어서 실패해도 무시하고 진행)
+          adb shell "curl -I https://www.google.com" || echo "⚠️ curl 없음, 바로 파이썬 실행"
+          
+          echo "🏃‍♂️ 파이썬 스크립트 실행!"
           mkdir -p screenshots
           python -u main.py
 
