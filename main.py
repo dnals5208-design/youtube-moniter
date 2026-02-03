@@ -1,256 +1,352 @@
 import time
-import uiautomator2 as u2
-import os
-import json
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime
-import sys
-import pytesseract
-from PIL import Image
+import random
+import pandas as pd
+from urllib.parse import urlparse, parse_qs, unquote
+from playwright.sync_api import sync_playwright
 
-ADB_ADDR = "emulator-5554" 
-KEYWORDS = ["해커스", "토익", "경찰공무원", "소방공무원", "공무원"]
-REPEAT_COUNT = 10 
-SCREENSHOT_DIR = "screenshots"
+# ==========================================
+# [설정 1] 모니터링 타겟
+# ==========================================
+MONITORING_TARGETS = [
+    {"keyword": "토익", "target_url": "https://www.hackers.co.kr"},
+    {"keyword": "공인중개사시험", "target_url": "https://land.hackers.com"},
+    {"keyword": "공무원시험", "target_url": "https://gosi.hackers.com"},
+    {"keyword": "경찰공무원시험", "target_url": "https://police.hackers.com"}
+]
 
-def get_worksheet():
-    try:
-        json_key = json.loads(os.environ['G_SHEET_KEY'])
-        sheet_id = os.environ['G_SHEET_ID']
-        scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(json_key, scope)
-        client = gspread.authorize(creds)
-        sh = client.open_by_key(sheet_id)
-        now = datetime.now()
-        sheet_name = f"{now.year % 100}.{now.month}/{now.day}"
-        header = ["날짜", "시간", "키워드", "회차", "광고여부", "비고"]
+TARGET_COLLECT_COUNT = 50  # 수집할 기사 링크 개수
+TARGET_AD_FOUND_LIMIT = 10 # [신규] 광고 발견 10개 채우면 1차 검사 중단
+MAX_CHECK_LIMIT = 50       # 최대 검사 한도
+
+# ==========================================
+# [설정 2] 광고 매체 코드
+# ==========================================
+NETWORK_MAPPING = {
+    "googleads": "G", "doubleclick": "G", "googlesyndication": "G",
+    "criteo": "C",
+    "widerplanet": "M", "mobon": "M",
+    "daum": "K", "kakao": "K",
+    "tg360": "T", "targetinggates": "T",
+    "acetrader": "A", "acecounter": "A"
+}
+DISPLAY_NETWORKS = ["G", "C", "K", "M", "T", "A"]
+
+# ==========================================
+# [설정 3] 경쟁사 목록
+# ==========================================
+COMPETITORS = {
+    "해커스": ["hackers", "champstudy"],
+    "에듀윌": ["eduwill"],
+    "YBM": ["ybm"],
+    "파고다": ["pagoda"],
+    "영단기": ["dangi"],
+    "공단기": ["gong.dangi"],
+    "박문각": ["pmg", "bakmun"],
+    "메가": ["megaland", "mega.co.kr"],
+    "야나두": ["yanadoo"],
+    "시원스쿨": ["siwon"]
+}
+DISPLAY_COMPANIES = list(COMPETITORS.keys())
+
+def get_clean_url(naver_redirect_url):
+    if "search.naver.com/p/crd" in naver_redirect_url:
         try:
-            worksheet = sh.worksheet(sheet_name)
-            if not worksheet.get_all_values(): worksheet.append_row(header)
-        except:
-            worksheet = sh.add_worksheet(title=sheet_name, rows="1000", cols="20")
-            worksheet.append_row(header)
-        return worksheet
-    except Exception as e:
-        print(f"❌ 구글 시트 연결 실패: {e}")
-        return None
-
-def append_to_sheet(worksheet, data):
-    if worksheet:
-        try:
-            row = [data["날짜"], data["시간"], data["키워드"], data["회차"], data["광고여부"], data["비고"]]
-            worksheet.append_row(row)
-            print("   📤 시트 저장 완료")
+            parsed = urlparse(naver_redirect_url)
+            query = parse_qs(parsed.query)
+            if 'u' in query: return unquote(query['u'][0])
         except: pass
+    return naver_redirect_url
 
-def read_screen_text(d, filename=None):
+def remove_mobon_icover(page):
+    """모비온 아이커버(전면광고) 삭제"""
     try:
-        temp_path = "current_screen.png"
-        d.screenshot(temp_path)
-        if filename:
-            save_path = os.path.join(SCREENSHOT_DIR, filename)
-            os.system(f"cp {temp_path} {save_path}")
-        text = pytesseract.image_to_string(Image.open(temp_path), lang='kor+eng')
-        return " ".join(text.split())
-    except: return ""
-
-def handle_google_blockers(d):
-    """크롬/유튜브의 각종 로그인/약관 방해꾼을 처리"""
-    # 1. 크롬 약관 (Accept & continue)
-    if d(text="Accept & continue").exists:
-        print("   🔨 [방해꾼] 약관 동의 클릭")
-        d(text="Accept & continue").click()
-        time.sleep(2)
-    
-    # 2. 크롬 로그인 권유 (No thanks / Use without account)
-    if d(text="No thanks").exists:
-        print("   🔨 [방해꾼] No thanks 클릭")
-        d(text="No thanks").click()
-    elif d(resourceId="com.android.chrome:id/negative_button").exists:
-        print("   🔨 [방해꾼] 거절 버튼(ID) 클릭")
-        d(resourceId="com.android.chrome:id/negative_button").click()
-    elif d(text="Use without an account").exists:
-        print("   🔨 [방해꾼] 계정 없이 사용 클릭")
-        d(text="Use without an account").click()
+        close_selectors = [
+            "#mobon_icover .btn_close", 
+            "#mobon_icover button",
+            "div[id*='mobon'] .close",
+            ".mobon_cover .btn_close"
+        ]
         
-    # 3. 유튜브 프리미엄/로그인 팝업
-    if d(text="Skip trial").exists: d(text="Skip trial").click()
-    if d(text="무료 체험 건너뛰기").exists: d(text="무료 체험 건너뛰기").click()
-    if d(text="나중에").exists: d(text="나중에").click()
+        for selector in close_selectors:
+            if page.locator(selector).is_visible():
+                # print("  🛡️ 모비온 닫기 클릭")
+                page.locator(selector).click(force=True)
+                time.sleep(0.5)
+                return
 
-def check_ip_browser(d):
-    print("🌐 IP 확인 (크롬 실행 중)...")
-    d.shell("am force-stop com.android.chrome")
-    d.app_start("com.android.chrome", stop=True)
-    time.sleep(5)
-    
-    # 방해꾼 1차 제거
-    handle_google_blockers(d)
-    
-    # URL 이동
-    d.shell('am start -a android.intent.action.VIEW -d "https://ipinfo.io/json" -p com.android.chrome')
-    time.sleep(8)
-    
-    # 방해꾼 2차 제거 (혹시 사이트 들어가려는데 또 떴을까봐)
-    handle_google_blockers(d)
-    
-    # ★ 요청하신 스크린샷 무조건 찍기
-    print("📸 IP 확인 화면 캡처 중...")
-    ip_text = read_screen_text(d, filename="DEBUG_IP_CHECK.png")
-    
-    if "KR" in ip_text or "Korea" in ip_text:
-        print(f"   ✅ [IP확인 성공] 한국 IP 감지됨")
-    else:
-        print(f"   ⚠️ [IP확인 실패] 인식된 텍스트: {ip_text[:50]}...")
-        # 실패했어도 죽지 않고 넘어갑니다. (유튜브가 중요하니까)
-
-def setup_youtube_force(d):
-    print("   🔨 유튜브 메인 화면 강제 진입...")
-    d.shell("am force-stop com.android.chrome")
-    d.shell("am force-stop com.google.android.youtube")
-    time.sleep(2)
-    
-    # ★ [핵심] 그냥 실행이 아니라 '메인 액티비티'를 콕 집어서 실행
-    # 이렇게 하면 팝업 위로 메인 화면이 뜰 확률이 높음
-    d.shell("am start -n com.google.android.youtube/com.google.android.apps.youtube.app.WatchWhileActivity")
-    time.sleep(10)
-    
-    handle_google_blockers(d)
-    
-    # 앱이 떴는지 패키지 확인
-    current = d.app_current()
-    print(f"   ℹ️ 현재 실행 중인 앱: {current['package']}")
-    
-    if current['package'] != "com.google.android.youtube":
-        print("   ⚠️ 유튜브가 아님 (로그인 창 등). 뒤로가기 3번 연타로 탈출 시도...")
-        d.press("back")
-        time.sleep(1)
-        d.press("back")
-        time.sleep(1)
-        d.press("back")
-        time.sleep(2)
-        # 다시 실행
-        d.shell("am start -n com.google.android.youtube/com.google.android.apps.youtube.app.WatchWhileActivity")
-        time.sleep(8)
-
-    # 시크릿 모드 진입
-    print("   🕵️ 시크릿 모드 진입 시도...")
-    # 1. 프로필 아이콘 (ID 우선)
-    if d(resourceId="com.google.android.youtube:id/mobile_user_account_image").exists:
-        d(resourceId="com.google.android.youtube:id/mobile_user_account_image").click()
-    elif d(description="Account").exists:
-        d(description="Account").click()
-    elif d(description="계정").exists:
-        d(description="계정").click()
-    else:
-        # 못 찾으면 우상단 좌표
-        d.click(0.92, 0.05)
-    
-    time.sleep(2)
-    
-    # 2. 메뉴 선택
-    if d(resourceId="com.google.android.youtube:id/new_incognito_session_item").exists:
-        d(resourceId="com.google.android.youtube:id/new_incognito_session_item").click()
-    elif d(text="Turn on Incognito").exists:
-        d(text="Turn on Incognito").click()
-    elif d(text="시크릿 모드 사용").exists:
-        d(text="시크릿 모드 사용").click()
-    
-    time.sleep(4)
-    if d(text="Got it").exists: d(text="Got it").click()
-    if d(text="확인").exists: d(text="확인").click()
-
-def run_android_monitoring():
-    ws = get_worksheet()
-    print(f"📱 [MO] 에뮬레이터 연결...")
-
-    try:
-        os.system("adb wait-for-device")
-        d = u2.connect(ADB_ADDR)
-        
-        # 1. IP 확인 (스크린샷 저장)
-        check_ip_browser(d)
-        
-        # 2. 유튜브 준비
-        setup_youtube_force(d)
-
-        for keyword in KEYWORDS:
-            print(f"\n🔎 [{keyword}] 검색 시작")
-            
-            for i in range(1, REPEAT_COUNT + 1):
-                sys.stdout.flush()
-                print(f"   [{i}/{REPEAT_COUNT}] 진행 중...", end=" ")
-                
-                # ★ 앱 이탈 방지 로직 강화
-                current = d.app_current()
-                if current['package'] != "com.google.android.youtube":
-                    print(f"⚠️ 앱 이탈 감지 (현재: {current['package']}). 유튜브 복귀...")
-                    d.shell("am start -n com.google.android.youtube/com.google.android.apps.youtube.app.WatchWhileActivity")
-                    time.sleep(5)
-
-                # 검색 버튼 클릭
-                if d(resourceId="com.google.android.youtube:id/menu_item_search").exists:
-                    d(resourceId="com.google.android.youtube:id/menu_item_search").click()
-                elif d(description="Search").exists:
-                    d(description="Search").click()
-                elif d(description="검색").exists:
-                    d(description="검색").click()
-                else:
-                    # 검색 버튼이 없으면 이미 검색창이거나, 홈이 아닐 수 있음 -> 좌표 클릭 시도 (최후의 수단)
-                    print("❌ 검색 버튼 ID 못 찾음. 좌표 클릭 시도.")
-                    d.click(0.85, 0.05) # 우상단
-                
-                time.sleep(2)
-                d.clear_text()
-                d.send_keys(keyword)
-                time.sleep(1)
-                d.press("enter")
-                time.sleep(8)
-                
-                # 결과 캡처
-                screen_text = read_screen_text(d, filename=f"{keyword}_{i}_top.png")
-                
-                # 로그인 방해꾼 청소
-                if any(x in screen_text for x in ["Sign in", "Google", "Account", "Verify", "인증"]):
-                    print("🧹 [청소] 로그인 팝업 -> 뒤로가기")
-                    d.press("back")
-                    time.sleep(2)
-                    screen_text = read_screen_text(d, filename=f"{keyword}_{i}_retry.png")
-
-                # 스크롤 & 광고 판별
-                d.swipe(500, 1500, 500, 500, 0.3) 
-                time.sleep(2)
-                
-                is_ad = "X"
-                ad_text = "-"
-                if any(x in screen_text for x in ["광고", "Ad", "Sponsored"]):
-                    is_ad = "O"
-                    ad_text = "광고 발견"
-                    if "해커스" in screen_text or "Hackers" in screen_text: ad_text = "해커스 광고"
-                    print(f"🚨 발견! ({ad_text})")
-                else:
-                    print(f"❌ 없음 (인식: {screen_text[:15]}...)")
-                
-                result_data = {
-                    "날짜": datetime.now().strftime('%Y-%m-%d'),
-                    "시간": datetime.now().strftime('%H:%M:%S'),
-                    "키워드": keyword,
-                    "회차": i,
-                    "광고여부": is_ad, 
-                    "비고": f"{ad_text}"
+        page.evaluate("""() => {
+            const elements = document.querySelectorAll("div, iframe");
+            elements.forEach(el => {
+                if (el.id.includes('mobon') || el.className.includes('mobon')) {
+                    if (el.style.display !== 'none') {
+                        el.remove();
+                    }
                 }
-                append_to_sheet(ws, result_data)
+            });
+        }""")
+    except:
+        pass
+
+def analyze_ads_count(page):
+    """광고 개수 및 발견된 경쟁사 분석"""
+    counts = {comp: {net: 0 for net in DISPLAY_NETWORKS} for comp in COMPETITORS}
+    
+    remove_mobon_icover(page)
+    
+    for frame in page.frames:
+        try:
+            frame_url = frame.url.lower()
+            try: frame_content = frame.content().lower()
+            except: frame_content = ""
+
+            detected_net_code = None
+            detected_company = None
+
+            for keyword, code in NETWORK_MAPPING.items():
+                if keyword in frame_url:
+                    detected_net_code = code
+                    break
+            
+            if detected_net_code and detected_net_code in DISPLAY_NETWORKS:
+                for comp_name, keywords in COMPETITORS.items():
+                    if any(k in frame_url for k in keywords) or any(k in frame_content for k in keywords):
+                        detected_company = comp_name
+                        break
                 
-                # 홈으로 복귀 (뒤로가기 2번)
-                d.press("back")
+                if detected_company:
+                    counts[detected_company][detected_net_code] += 1
+        except: continue
+        
+    return counts
+
+def run_monitoring():
+    start_time = time.time()
+    total_data = {}
+
+    with sync_playwright() as p:
+        print("🚀 [최종] 모니터링 시작 (화면표시 ON / 10개 발견 시 조기 종료)")
+        
+        # 화면에 보이도록 설정 (0,0)
+        browser = p.chromium.launch(
+            channel="msedge", headless=False,
+            args=["--window-position=0,0", "--disable-blink-features=AutomationControlled"]
+        )
+        context = browser.new_context(viewport={'width': 1920, 'height': 1080})
+        context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        page = context.new_page()
+
+        for item in MONITORING_TARGETS:
+            keyword = item["keyword"]
+            target_url = item["target_url"]
+            context.clear_cookies()
+            
+            print(f"\n==================================================")
+            print(f"🔎 키워드: '{keyword}' 작업 시작")
+            print(f"==================================================")
+            
+            # -------------------------------------------------
+            # 1. 링크 수집 (스크롤 적용)
+            # -------------------------------------------------
+            search_url = f"https://search.naver.com/search.naver?where=news&query={keyword}&sm=tab_opt&sort=0&photo=0&field=0&pd=0&ds=&de=&docid=&related=0&mynews=0&office_type=0&office_section_code=0&news_office_checked=&nso=so%3Ar%2Cp%3Aall&is_sug_officeid=0"
+            page.goto(search_url, wait_until="domcontentloaded")
+            
+            collected_articles = []
+            page_num = 1
+            
+            while len(collected_articles) < TARGET_COLLECT_COUNT:
+                try:
+                    # 스크롤 최하단 이동
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    time.sleep(1.5)
+                    page.keyboard.press("End")
+                    time.sleep(1)
+
+                    try: page.wait_for_selector('[data-heatmap-target=".tit"]', timeout=3000)
+                    except: page.wait_for_selector(".news_tit", timeout=3000)
+
+                    new_links = page.evaluate("""() => {
+                        let nodes = document.querySelectorAll('[data-heatmap-target=".tit"]');
+                        if (nodes.length === 0) nodes = document.querySelectorAll('.news_tit');
+                        return Array.from(nodes).map(a => ({text: a.innerText, url: a.href}));
+                    }""")
+                    
+                    prev_len = len(collected_articles)
+                    for link in new_links:
+                        if not any(saved['url'] == link['url'] for saved in collected_articles):
+                            collected_articles.append(link)
+                    
+                    print(f"  > {page_num}페이지 수집 중... (누적 {len(collected_articles)}/{TARGET_COLLECT_COUNT}개)")
+                    
+                    if len(collected_articles) >= TARGET_COLLECT_COUNT:
+                        break
+                    
+                    # 더 이상 기사가 없으면 종료
+                    if len(collected_articles) == prev_len and page_num > 1:
+                         # 마지막 확인 사살
+                        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                        time.sleep(2)
+                        next_btn_check = page.locator(".btn_next")
+                        if next_btn_check.count() == 0 or next_btn_check.get_attribute("aria-disabled") == "true":
+                            print("  > 더 이상 기사가 없습니다.")
+                            break
+
+                    next_btn = page.locator(".btn_next")
+                    if next_btn.count() > 0 and next_btn.get_attribute("aria-disabled") != "true":
+                        remove_mobon_icover(page) 
+                        page.evaluate("document.querySelector('.btn_next').click()")
+                        page_num += 1
+                        time.sleep(2.5)
+                    else:
+                        break
+                except Exception as e:
+                    print(f"  ⚠️ 수집 에러: {e}")
+                    break
+
+            collected_articles = collected_articles[:TARGET_COLLECT_COUNT]
+            print(f"  > 링크 수집 완료. 1차 분석 시작 (목표: 광고 발견 {TARGET_AD_FOUND_LIMIT}건)")
+
+            # -------------------------------------------------
+            # 2. [1차] 방문 전 검사 (10개 찾으면 STOP)
+            # -------------------------------------------------
+            target_articles = [] # 실제 광고가 발견된 URL 리스트
+            found_ad_count = 0   # 찾은 광고 개수 카운터
+
+            for i, article in enumerate(collected_articles):
+                # 10개 찾았으면 루프 탈출
+                if found_ad_count >= TARGET_AD_FOUND_LIMIT:
+                    print(f"  🛑 목표 광고 {TARGET_AD_FOUND_LIMIT}개를 모두 찾았습니다. 1차 검사 종료.")
+                    break
+                
+                real_url = get_clean_url(article['url'])
+                if not real_url.startswith("http"): continue
+                
+                if real_url not in total_data:
+                    total_data[real_url] = {
+                        'info': {'키워드': keyword, '기사제목': article['text']},
+                        'before': {}, 'after': {}
+                    }
+
+                print(f"  > [방문전] {i+1}번째 기사 확인 중...", end="")
+                try:
+                    page.goto(real_url, timeout=15000, wait_until="domcontentloaded")
+                    remove_mobon_icover(page)
+                    
+                    # 광고 로딩 유도 (스크롤)
+                    page.keyboard.press("End")
+                    time.sleep(2.5)
+                    for _ in range(2): 
+                        page.mouse.wheel(0, -1000)
+                        time.sleep(0.2)
+                        remove_mobon_icover(page) 
+                    
+                    counts = analyze_ads_count(page)
+                    total_data[real_url]['before'] = counts
+                    
+                    # 발견된 회사 찾기
+                    found_companies = []
+                    for comp, nets in counts.items():
+                        if sum(nets.values()) > 0:
+                            found_companies.append(comp)
+                    
+                    if found_companies:
+                        print(f" ✅ 광고발견 ({', '.join(found_companies)})")
+                        target_articles.append(real_url)
+                        found_ad_count += 1
+                    else:
+                        print(f" (타사 없음)")
+                        
+                except: print(" ⚠️ 에러/패스")
+                time.sleep(0.5)
+
+            if not target_articles:
+                print("  ⚠️ 발견된 타사 광고가 없어 2차 검사를 생략합니다.")
+                continue
+
+            # -------------------------------------------------
+            # 3. 타사 사이트 방문 (쿠키 생성)
+            # -------------------------------------------------
+            print(f"  > [쿠키 작업] 경쟁사 타겟 사이트 방문: {target_url}")
+            try:
+                page.goto(target_url)
+                time.sleep(4)
+                page.mouse.wheel(0, 1000)
                 time.sleep(1)
-                d.press("back")
-                time.sleep(2)
+            except: pass
+
+            # -------------------------------------------------
+            # 4. [2차] 방문 후 검사 (찾았던 10개만 다시 확인)
+            # -------------------------------------------------
+            print(f"  > [방문후] 발견했던 {len(target_articles)}개 기사 재확인 시작...")
+            for url in target_articles:
+                print(f"  > 재진입: {url[:40]}...", end="")
+                try:
+                    page.goto(url, timeout=15000, wait_until="domcontentloaded")
+                    remove_mobon_icover(page)
+                    
+                    page.keyboard.press("End")
+                    time.sleep(2.5)
+                    for _ in range(2): 
+                        page.mouse.wheel(0, -1000)
+                        remove_mobon_icover(page)
+                    
+                    counts = analyze_ads_count(page)
+                    total_data[url]['after'] = counts
+                    
+                    # 재진입 시 발견된 회사
+                    found_companies = [comp for comp, nets in counts.items() if sum(nets.values()) > 0]
+                    if found_companies:
+                        print(f" ✅ ({', '.join(found_companies)})")
+                    else:
+                        print(" (사라짐/타사없음)")
+                        
+                except: print(" ⚠️ 실패")
+                time.sleep(0.5)
+
+        browser.close()
+
+    # 엑셀 저장
+    print("\n📊 엑셀 파일 생성 중...")
+    columns = [('기본정보', '기본정보', '키워드'), ('기본정보', '기본정보', '기사제목'), ('기본정보', '기본정보', 'URL')]
+    
+    for comp in DISPLAY_COMPANIES:
+        for phase in ['쿠키값 삭제', '방문 후']:
+            for net in DISPLAY_NETWORKS:
+                columns.append((comp, phase, net))
+    
+    multi_columns = pd.MultiIndex.from_tuples(columns, names=['회사', '시기', '매체'])
+    
+    rows = []
+    # 데이터가 있는 것만 저장 (Pre-visit에서 10개만 돌렸으면 10개만 저장됨)
+    for url, data in total_data.items():
+        # 수집은 했으나 방문하지 않아 데이터가 비어있는 경우 제외
+        if not data['before'] and not data['after']:
+            continue
+            
+        row_data = [data['info']['키워드'], data['info']['기사제목'], url]
+        
+        for comp in DISPLAY_COMPANIES:
+            # 방문 전
+            before = data['before'].get(comp, {n:0 for n in DISPLAY_NETWORKS})
+            for net in DISPLAY_NETWORKS:
+                cnt = before.get(net, 0)
+                row_data.append(cnt if cnt > 0 else "")
+            
+            # 방문 후
+            after = data['after'].get(comp, {n:0 for n in DISPLAY_NETWORKS})
+            for net in DISPLAY_NETWORKS:
+                cnt = after.get(net, 0)
+                row_data.append(cnt if cnt > 0 else "")
                 
-    except Exception as e:
-        print(f"에러 발생: {e}")
+        rows.append(row_data)
+
+    df = pd.DataFrame(rows, columns=multi_columns)
+    file_name = f"배너모니터링_최종완료_{time.strftime('%H%M%S')}.xlsx"
+    df.to_excel(file_name)
+    
+    end_time = time.time()
+    elapsed = end_time - start_time
+    print(f"\n🎉 [완료] 파일 저장됨: {file_name}")
+    print(f"⏱️ 소요 시간: {int(elapsed//60)}분 {int(elapsed%60)}초")
 
 if __name__ == "__main__":
-    if not os.path.exists(SCREENSHOT_DIR): os.makedirs(SCREENSHOT_DIR)
-    run_android_monitoring()
+    run_monitoring()
