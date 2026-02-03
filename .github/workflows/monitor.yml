@@ -17,14 +17,13 @@ jobs:
       with:
         python-version: '3.10'
 
-    - name: Install Dependencies (Privoxy 추가)
+    - name: Install Dependencies (Privoxy 포함)
       run: |
         sudo apt-get update
         sudo apt-get install -y tesseract-ocr tesseract-ocr-kor libtesseract-dev net-tools privoxy
 
     - name: Configure Privoxy (HTTP -> SOCKS5 Bridge)
       run: |
-        # Privoxy 설정 파일 수정: 8118 포트로 들어오면 8080(SOCKS)으로 넘겨라
         echo 'forward-socks5t / 127.0.0.1:8080 .' | sudo tee -a /etc/privoxy/config
         sudo service privoxy restart
 
@@ -49,16 +48,11 @@ jobs:
     - name: 🛡️ [진단] 호스트 IP 확인
       run: |
         echo "🌐 GitHub 호스트 IP 검사..."
-        # 1. SSH 터널 직접 테스트 (SOCKS5)
-        SOCKS_IP=$(curl -s --socks5 127.0.0.1:8080 https://ipinfo.io/json)
-        echo "   👉 SSH 터널(8080) IP: $SOCKS_IP"
-        
-        # 2. Privoxy 중계 테스트 (HTTP)
         HTTP_IP=$(curl -s -x http://127.0.0.1:8118 https://ipinfo.io/json)
         echo "   👉 Privoxy(8118) IP: $HTTP_IP"
         
         if [[ "$HTTP_IP" == *"KR"* ]] || [[ "$HTTP_IP" == *"Korea"* ]]; then
-          echo "✅ [성공] 통역사(Privoxy)가 한국 IP로 잘 연결해줍니다!"
+          echo "✅ [성공] 한국 IP 확인됨!"
         else
           echo "❌ [실패] 한국 IP가 아닙니다."
           exit 1
@@ -80,20 +74,26 @@ jobs:
         ram-size: 2048M
         heap-size: 512M
         
-        # ★ 핵심 변경: socks5:// 대신 http://127.0.0.1:8118 (Privoxy) 사용
-        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-load -http-proxy http://127.0.0.1:8118 -prop persist.sys.language=ko -prop persist.sys.country=KR -prop persist.sys.locale=ko-KR
+        # Privoxy 사용
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-load -http-proxy http://127.0.0.1:8118
         
         script: |
           echo "🚀 안드로이드(API 29) 부팅 완료."
+          
+          echo "🇰🇷 [설정] 시스템 언어 한국어로 강제 변경..."
+          adb shell setprop persist.sys.language ko
+          adb shell setprop persist.sys.country KR
+          adb shell setprop persist.sys.locale ko-KR
+          
+          # 설정 적용을 위해 잠시 대기
+          sleep 5
+          
           echo "💤 앱 초기화 대기 (60초)..."
           sleep 60
           
           echo "🔓 화면 깨우기..."
           adb shell input keyevent 82
           adb shell input keyevent 3
-          
-          # 구글 플레이 서비스 로그인 창 끄기 (혹시 몰라서)
-          adb shell input keyevent 4
           
           echo "🏃‍♂️ 파이썬 스크립트 실행!"
           mkdir -p screenshots
