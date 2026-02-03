@@ -67,38 +67,46 @@ def read_screen_text(d, filename=None):
         
         text = pytesseract.image_to_string(Image.open(temp_path), lang='kor+eng')
         clean_text = " ".join(text.split())
-        
-        # 텍스트가 비어있으면(로딩중/흰화면) XML 덤프라도 시도
-        if not clean_text:
-            return ""
         return clean_text
     except Exception as e:
         return ""
 
 # ==========================================
-# [기능] 크롬 초기 설정 강제 스킵 (XML 분석)
+# [기능] 크롬 초기 설정 강제 스킵 (보강됨)
 # ==========================================
 def skip_chrome_welcome(d):
-    print("   🔨 크롬 설정 건너뛰기 (스마트 감지)...")
+    print("   🔨 크롬 설정 건너뛰기 (로그인 화면 포함)...")
     d.app_start("com.android.chrome")
     time.sleep(5)
     
-    # UI 계층구조 덤프 (버튼 찾기용)
-    xml = d.dump_hierarchy()
+    # 1. 약관 동의 (Accept & continue)
+    if d(text="Accept & continue").exists:
+        d(text="Accept & continue").click()
+        print("      -> 약관 동의 클릭")
+    elif d(resourceId="com.android.chrome:id/terms_accept").exists:
+        d(resourceId="com.android.chrome:id/terms_accept").click()
+        print("      -> 약관 동의(ID) 클릭")
+        
+    time.sleep(3)
     
-    # "Accept" 또는 "동의" 버튼이 보이면 클릭
-    if "Accept" in xml or "동의" in xml:
-        print("      -> 약관 동의 버튼 발견 및 클릭")
-        d(resourceId="com.android.chrome:id/terms_accept").click_exists(timeout=2)
-        d(text="Accept & continue").click_exists(timeout=2)
+    # 2. 로그인 요청 화면 (Sign in to Chrome) -> 거절
+    # "No thanks" 버튼이 보통 좌측 하단에 있음
+    if d(text="No thanks").exists:
+        d(text="No thanks").click()
+        print("      -> 로그인 거절(No thanks) 클릭")
+    elif d(resourceId="com.android.chrome:id/negative_button").exists:
+        d(resourceId="com.android.chrome:id/negative_button").click()
+        print("      -> 로그인 거절(ID) 클릭")
+    else:
+        # 버튼을 못 찾겠으면 좌표로 찍어버림 (좌측 하단)
+        print("      -> 버튼 못 찾음. 좌표 강제 클릭 (No thanks 위치)")
+        d.click(0.25, 0.9) 
     
     time.sleep(2)
     
-    # "No thanks" 또는 "사용 안함"
-    if "No thanks" in xml or "사용 안함" in xml:
-        print("      -> 동기화 거절 버튼 발견 및 클릭")
-        d(resourceId="com.android.chrome:id/negative_button").click_exists(timeout=2)
-        d(text="No thanks").click_exists(timeout=2)
+    # 3. 알림 권한 팝업
+    if d(text="No thanks").exists:
+        d(text="No thanks").click()
 
 # ==========================================
 # [기능] IP 확인
@@ -110,44 +118,49 @@ def check_ip_browser(d):
     
     # IP 사이트 접속
     d.shell('am start -a android.intent.action.VIEW -d "https://ipinfo.io/json" -p com.android.chrome')
-    time.sleep(10) # 로딩 시간 충분히 줌
+    time.sleep(10)
     
-    screen_text = read_screen_text(d, filename="ip_check_result.png")
+    screen_text = read_screen_text(d, filename="ip_check_final.png")
     
     if "KR" in screen_text or "Korea" in screen_text:
         print(f"   ✅ [성공] 한국 IP 확인됨!")
     elif "US" in screen_text:
         print(f"   ⚠️ [주의] 미국 IP입니다. (터널 실패)")
+    elif "Sign in" in screen_text:
+        print(f"   ⚠️ [주의] 여전히 로그인 화면입니다. (스킵 실패)")
     else:
-        # 화면이 하얗거나 인식이 안 된 경우
-        print(f"   ❌ [오류] IP 정보 인식 불가. (화면이 로딩 중이거나 인터넷 끊김)")
-        print(f"       -> 인식된 텍스트: '{screen_text}'")
+        print(f"   ℹ️ 화면 내용: {screen_text[:30]}...")
 
 # ==========================================
-# [기능] 유튜브 실행
+# [기능] 유튜브 실행 (크롬 죽이고 실행)
 # ==========================================
 def setup_youtube(d):
-    print("   🔨 유튜브 어플 실행...")
+    print("   🔨 크롬 강제 종료 및 유튜브 실행...")
+    
+    # ★ 핵심: 크롬이 화면 가리는 것 방지
+    d.shell("am force-stop com.android.chrome")
+    d.press("home")
+    time.sleep(1)
+    
     d.app_stop("com.google.android.youtube")
     d.app_start("com.google.android.youtube")
     time.sleep(8)
     
+    # 팝업 닫기 시도
     d.click(0.5, 0.9) 
 
     print("   🕵️ 시크릿 모드 진입...")
-    d.click(0.92, 0.05) 
+    d.click(0.92, 0.05) # 프로필 아이콘
     time.sleep(2)
     
-    # 시크릿 모드 메뉴 찾기 (좌표 대신 텍스트로)
     if d(text="Turn on Incognito").exists:
         d(text="Turn on Incognito").click()
     elif d(text="시크릿 모드 사용").exists:
         d(text="시크릿 모드 사용").click()
     else:
-        # 못 찾으면 좌표 클릭 (비상용)
         d.click(0.92, 0.05)
         time.sleep(1)
-        d.click(0.5, 0.35)
+        d.click(0.5, 0.35) 
     
     time.sleep(4)
     d.click(0.5, 0.9) 
@@ -170,10 +183,11 @@ def run_android_monitoring():
                 sys.stdout.flush()
                 print(f"   [{i}/{REPEAT_COUNT}] 진행 중...", end=" ")
                 
+                # 유튜브 검색 실행
                 cmd = f'am start -a android.intent.action.VIEW -d "https://www.youtube.com/results?search_query={keyword}" -p com.google.android.youtube'
                 d.shell(cmd)
                 
-                time.sleep(10) # 검색 결과 로딩 대기
+                time.sleep(10)
                 
                 # 상단 캡처
                 screen_text = read_screen_text(d, filename=f"{keyword}_{i}_top.png")
@@ -184,8 +198,10 @@ def run_android_monitoring():
                 is_ad = "X"
                 ad_text = "-"
                 
-                if not screen_text:
-                    print(f"❌ [오류] 화면 인식 실패 (빈 화면)")
+                # 여전히 Sign in 화면이 보이면 크롬이 살아있는 것
+                if "Sign in" in screen_text:
+                     print(f"❌ [오류] 크롬 로그인 화면이 가리고 있음.")
+                     d.shell("am force-stop com.android.chrome") # 다시 죽이기
                 elif "광고" in screen_text or "Ad" in screen_text or "Sponsored" in screen_text:
                     is_ad = "O"
                     ad_text = "광고 발견"
