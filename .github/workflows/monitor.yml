@@ -17,7 +17,7 @@ jobs:
       with:
         python-version: '3.10'
 
-    - name: Install System Dependencies (OCR)
+    - name: Install Dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y tesseract-ocr tesseract-ocr-kor libtesseract-dev net-tools
@@ -36,23 +36,29 @@ jobs:
         printf "%s\n" "$ORACLE_KEY" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
         
-        echo "🔌 SSH 터널 연결 시도 (SOCKS5)..."
-        # -D 8080: SOCKS5 프록시 생성
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -4 -D 8080 -f -C -N -i ~/.ssh/id_rsa $ORACLE_USER@$ORACLE_HOST -v
+        echo "🔌 SSH 터널 연결 시도 (SOCKS5 Proxy)..."
+        # -o ExitOnForwardFailure=yes: 터널 실패하면 바로 에러 띄움
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ExitOnForwardFailure=yes -4 -D 8080 -f -C -N -i ~/.ssh/id_rsa $ORACLE_USER@$ORACLE_HOST -v
         
+        echo "⏳ 터널 안정화 대기 (5초)..."
         sleep 5
+
+    - name: 🛡️ [진단] 호스트 IP 확인 (여기서 실패하면 중단)
+      run: |
+        echo "🌐 GitHub Runner에서 프록시 테스트 중..."
+        # 1. 프록시 없이 확인 (미국 IP 나와야 정상)
+        echo "   👉 내 원래 IP: $(curl -s https://ipinfo.io/json | grep ip)"
         
-        echo "🌐 [진단] 호스트(GitHub 컴퓨터) IP 확인..."
-        # 호스트에서 먼저 터널을 통해 IP를 확인합니다.
-        # 여기서 KR이 뜨면 서버는 100% 뚫린 겁니다.
-        IP_INFO=$(curl -s --socks5-hostname 127.0.0.1:8080 https://ipinfo.io/json)
-        echo "응답 데이터: $IP_INFO"
+        # 2. 프록시 통해서 확인 (한국 IP 나와야 성공)
+        PROXY_IP=$(curl -s --socks5-hostname 127.0.0.1:8080 https://ipinfo.io/json)
+        echo "   👉 프록시 적용 IP 데이터: $PROXY_IP"
         
-        if [[ "$IP_INFO" == *"KR"* ]] || [[ "$IP_INFO" == *"Korea"* ]]; then
-          echo "✅ 한국 IP 확인 성공! (터널 정상)"
+        if [[ "$PROXY_IP" == *"KR"* ]] || [[ "$PROXY_IP" == *"Korea"* ]]; then
+          echo "✅ [성공] 터널이 완벽하게 뚫렸습니다! 한국 IP입니다."
         else
-          echo "❌ 한국 IP 아님! (터널 실패 또는 오라클 방화벽 문제)"
-          # 실패해도 일단 진행해서 스크린샷 남김
+          echo "❌ [실패] 여전히 한국 IP가 아닙니다. 서버 설정을 다시 확인해야 합니다."
+          echo "   (응답 내용: $PROXY_IP)"
+          exit 1 # 여기서 강제로 멈춤 (에뮬레이터 실행 X)
         fi
 
     - name: Enable KVM
@@ -70,7 +76,7 @@ jobs:
         profile: Nexus 6
         ram-size: 2048M
         heap-size: 512M
-        # ★ 수정됨: socks5:// 접두어 추가! (이게 없어서 미국 IP가 떴던 겁니다)
+        # ★ 중요: socks5:// 명시
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -dns-server 8.8.8.8 -no-snapshot-load -http-proxy socks5://127.0.0.1:8080 -prop persist.sys.language=ko -prop persist.sys.country=KR -prop persist.sys.locale=ko-KR
         
         script: |
