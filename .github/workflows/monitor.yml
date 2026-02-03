@@ -74,14 +74,12 @@ jobs:
         script: |
           echo "🚀 안드로이드 부팅 완료."
           
-          echo "👑 관리자 권한 시도 (실패해도 진행)..."
-          adb root || true
-          sleep 5
+          echo "⏰ [설정] 시간 자동 동기화 켜기..."
+          # 관리자 권한 없이도 가능한 설정입니다.
+          adb shell settings put global auto_time 1
+          adb shell settings put global auto_time_zone 1
           
-          echo "⏰ 시간 설정 시도 (에러나면 무시)..."
-          adb shell settings put global auto_time 1 || true
-          
-          echo "💤 앱 초기화 대기 (60초)..."
+          echo "💤 앱 초기화 및 시간 동기화 대기 (60초)..."
           sleep 60
           
           echo "🔓 화면 깨우기..."
