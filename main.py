@@ -55,7 +55,7 @@ def append_to_sheet(worksheet, data):
             print(f"   ⚠️ 시트 저장 실패: {e}")
 
 # ==========================================
-# [기능] 화면 텍스트 읽기 (OCR)
+# [기능] OCR (화면 읽기)
 # ==========================================
 def read_screen_text(d, filename=None):
     try:
@@ -72,51 +72,36 @@ def read_screen_text(d, filename=None):
         return ""
 
 # ==========================================
-# [기능] 크롬 초기 설정 강제 스킵 (보강됨)
+# [기능] 크롬 초기 설정 강제 스킵
 # ==========================================
 def skip_chrome_welcome(d):
-    print("   🔨 크롬 설정 건너뛰기 (로그인 화면 포함)...")
+    print("   🔨 크롬 설정 건너뛰기...")
     d.app_start("com.android.chrome")
     time.sleep(5)
     
-    # 1. 약관 동의 (Accept & continue)
+    # 약관 동의
     if d(text="Accept & continue").exists:
         d(text="Accept & continue").click()
-        print("      -> 약관 동의 클릭")
     elif d(resourceId="com.android.chrome:id/terms_accept").exists:
         d(resourceId="com.android.chrome:id/terms_accept").click()
-        print("      -> 약관 동의(ID) 클릭")
         
     time.sleep(3)
     
-    # 2. 로그인 요청 화면 (Sign in to Chrome) -> 거절
-    # "No thanks" 버튼이 보통 좌측 하단에 있음
+    # 로그인 거절
     if d(text="No thanks").exists:
         d(text="No thanks").click()
-        print("      -> 로그인 거절(No thanks) 클릭")
     elif d(resourceId="com.android.chrome:id/negative_button").exists:
         d(resourceId="com.android.chrome:id/negative_button").click()
-        print("      -> 로그인 거절(ID) 클릭")
     else:
-        # 버튼을 못 찾겠으면 좌표로 찍어버림 (좌측 하단)
-        print("      -> 버튼 못 찾음. 좌표 강제 클릭 (No thanks 위치)")
-        d.click(0.25, 0.9) 
-    
-    time.sleep(2)
-    
-    # 3. 알림 권한 팝업
-    if d(text="No thanks").exists:
-        d(text="No thanks").click()
+        d.click(0.25, 0.9) # 좌측 하단 강제 클릭
 
 # ==========================================
-# [기능] IP 확인
+# [기능] IP 확인 (브라우저)
 # ==========================================
 def check_ip_browser(d):
     print("🌐 IP 위치 확인 중...")
-    
     skip_chrome_welcome(d)
     
-    # IP 사이트 접속
     d.shell('am start -a android.intent.action.VIEW -d "https://ipinfo.io/json" -p com.android.chrome')
     time.sleep(10)
     
@@ -125,45 +110,57 @@ def check_ip_browser(d):
     if "KR" in screen_text or "Korea" in screen_text:
         print(f"   ✅ [성공] 한국 IP 확인됨!")
     elif "US" in screen_text:
-        print(f"   ⚠️ [주의] 미국 IP입니다. (터널 실패)")
-    elif "Sign in" in screen_text:
-        print(f"   ⚠️ [주의] 여전히 로그인 화면입니다. (스킵 실패)")
+        print(f"   ⚠️ [주의] 미국 IP입니다.")
     else:
-        print(f"   ℹ️ 화면 내용: {screen_text[:30]}...")
+        print(f"   ℹ️ (참고) 화면 내용: {screen_text[:50]}...")
 
 # ==========================================
-# [기능] 유튜브 실행 (크롬 죽이고 실행)
+# [기능] 유튜브 실행 (순정 앱 터치 방식)
 # ==========================================
 def setup_youtube(d):
     print("   🔨 크롬 강제 종료 및 유튜브 실행...")
-    
-    # ★ 핵심: 크롬이 화면 가리는 것 방지
-    d.shell("am force-stop com.android.chrome")
+    d.shell("am force-stop com.android.chrome") # 크롬 죽이기
     d.press("home")
     time.sleep(1)
     
-    d.app_stop("com.google.android.youtube")
+    # 1. 앱 실행
     d.app_start("com.google.android.youtube")
     time.sleep(8)
     
-    # 팝업 닫기 시도
-    d.click(0.5, 0.9) 
+    # 2. 팝업(Premium 권유 등) 닫기 시도
+    if d(text="Skip trial").exists:
+        d(text="Skip trial").click()
+    if d(text="No thanks").exists:
+        d(text="No thanks").click()
+    d.click(0.5, 0.9) # 혹시 모르니 하단 빈공간 클릭
 
+    # 3. 시크릿 모드 진입
     print("   🕵️ 시크릿 모드 진입...")
-    d.click(0.92, 0.05) # 프로필 아이콘
+    # 프로필 아이콘 클릭 (ID로 찾기 시도)
+    if d(resourceId="com.google.android.youtube:id/mobile_user_account_image").exists:
+        d(resourceId="com.google.android.youtube:id/mobile_user_account_image").click()
+    else:
+        # 못 찾으면 좌표(우상단)
+        d.click(0.92, 0.05)
+    
     time.sleep(2)
     
+    # 시크릿 모드 메뉴 클릭
     if d(text="Turn on Incognito").exists:
         d(text="Turn on Incognito").click()
     elif d(text="시크릿 모드 사용").exists:
         d(text="시크릿 모드 사용").click()
     else:
-        d.click(0.92, 0.05)
-        time.sleep(1)
+        # 좌표(메뉴 중간쯤)
         d.click(0.5, 0.35) 
     
-    time.sleep(4)
-    d.click(0.5, 0.9) 
+    time.sleep(5)
+    
+    # "Got it" 확인 버튼
+    if d(text="Got it").exists:
+        d(text="Got it").click()
+    else:
+        d.click(0.5, 0.9)
 
 def run_android_monitoring():
     ws = get_worksheet()
@@ -177,31 +174,55 @@ def run_android_monitoring():
         setup_youtube(d)
 
         for keyword in KEYWORDS:
-            print(f"\n🔎 [{keyword}] 검색 시작")
+            print(f"\n🔎 [{keyword}] 검색 시작 (앱 터치 방식)")
             
             for i in range(1, REPEAT_COUNT + 1):
                 sys.stdout.flush()
                 print(f"   [{i}/{REPEAT_COUNT}] 진행 중...", end=" ")
                 
-                # 유튜브 검색 실행
-                cmd = f'am start -a android.intent.action.VIEW -d "https://www.youtube.com/results?search_query={keyword}" -p com.google.android.youtube'
-                d.shell(cmd)
+                # ====================================================
+                # ★ [핵심] URL 실행 대신 '돋보기' 버튼 누르고 타이핑
+                # ====================================================
                 
-                time.sleep(10)
+                # 1. 돋보기 버튼(검색) 클릭
+                # (보통 ID: menu_item_search 또는 설명: Search)
+                if d(description="Search").exists:
+                    d(description="Search").click()
+                elif d(resourceId="com.google.android.youtube:id/menu_item_search").exists:
+                    d(resourceId="com.google.android.youtube:id/menu_item_search").click()
+                elif d(description="검색").exists:
+                    d(description="검색").click()
+                else:
+                    # 못 찾으면 우측 상단 돋보기 위치 강제 클릭
+                    d.click(0.85, 0.05)
+                
+                time.sleep(2)
+                
+                # 2. 검색어 입력
+                d.clear_text() # 기존 검색어 삭제
+                d.send_keys(keyword)
+                time.sleep(1)
+                
+                # 3. 엔터키 입력 (검색 실행)
+                d.press("enter")
+                
+                # 4. 결과 로딩 대기
+                time.sleep(8)
                 
                 # 상단 캡처
                 screen_text = read_screen_text(d, filename=f"{keyword}_{i}_top.png")
                 
+                # 스크롤
                 d.swipe(500, 1500, 500, 500, 0.3) 
                 time.sleep(2)
                 
                 is_ad = "X"
                 ad_text = "-"
                 
-                # 여전히 Sign in 화면이 보이면 크롬이 살아있는 것
-                if "Sign in" in screen_text:
-                     print(f"❌ [오류] 크롬 로그인 화면이 가리고 있음.")
-                     d.shell("am force-stop com.android.chrome") # 다시 죽이기
+                # 크롬이 튀어나오면 다시 죽임
+                if "Sign in" in screen_text or "Chrome" in screen_text:
+                     print(f"❌ [오류] 크롬이 방해함. 강제 종료.")
+                     d.shell("am force-stop com.android.chrome")
                 elif "광고" in screen_text or "Ad" in screen_text or "Sponsored" in screen_text:
                     is_ad = "O"
                     ad_text = "광고 발견"
@@ -222,6 +243,12 @@ def run_android_monitoring():
                     "비고": f"{ad_text}"
                 }
                 append_to_sheet(ws, result_data)
+                
+                # 다음 검색을 위해 뒤로가기 두 번 (검색 목록 -> 홈)
+                d.press("back")
+                time.sleep(1)
+                d.press("back")
+                time.sleep(2)
                 
     except Exception as e:
         print(f"에러 발생: {e}")
