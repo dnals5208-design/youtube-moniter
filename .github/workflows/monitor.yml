@@ -17,12 +17,12 @@ jobs:
       with:
         python-version: '3.10'
 
-    - name: Install Dependencies (Privoxy 포함)
+    - name: Install Dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y tesseract-ocr tesseract-ocr-kor libtesseract-dev net-tools privoxy
 
-    - name: Configure Privoxy (HTTP -> SOCKS5 Bridge)
+    - name: Configure Privoxy
       run: |
         echo 'forward-socks5t / 127.0.0.1:8080 .' | sudo tee -a /etc/privoxy/config
         sudo service privoxy restart
@@ -31,7 +31,7 @@ jobs:
       run: |
         pip install pandas uiautomator2 gspread oauth2client pytesseract Pillow
 
-    - name: Setup SSH Tunnel (SOCKS5)
+    - name: Setup SSH Tunnel
       env:
         ORACLE_KEY: ${{ secrets.ORACLE_KEY }}
         ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
@@ -40,17 +40,13 @@ jobs:
         mkdir -p ~/.ssh
         printf "%s\n" "$ORACLE_KEY" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
-        
-        echo "🔌 SSH 터널 연결 (8080 포트)..."
         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ExitOnForwardFailure=yes -4 -D 8080 -f -C -N -i ~/.ssh/id_rsa $ORACLE_USER@$ORACLE_HOST
         sleep 5
 
     - name: 🛡️ [진단] 호스트 IP 확인
       run: |
-        echo "🌐 GitHub 호스트 IP 검사..."
         HTTP_IP=$(curl -s -x http://127.0.0.1:8118 https://ipinfo.io/json)
-        echo "   👉 Privoxy(8118) IP: $HTTP_IP"
-        
+        echo "   👉 Privoxy IP: $HTTP_IP"
         if [[ "$HTTP_IP" == *"KR"* ]] || [[ "$HTTP_IP" == *"Korea"* ]]; then
           echo "✅ [성공] 한국 IP 확인됨!"
         else
@@ -64,7 +60,7 @@ jobs:
         sudo udevadm control --reload-rules
         sudo udevadm trigger --name-match=kvm
 
-    - name: Run Android Emulator & Script
+    - name: Run Android Emulator
       uses: reactivecircus/android-emulator-runner@v2
       with:
         api-level: 29
@@ -73,25 +69,17 @@ jobs:
         profile: Nexus 6
         ram-size: 2048M
         heap-size: 512M
-        
-        # 언어 설정만 유지
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-load -http-proxy http://127.0.0.1:8118 -prop persist.sys.language=ko -prop persist.sys.country=KR -prop persist.sys.locale=ko-KR
         
         script: |
-          echo "🚀 안드로이드(API 29) 부팅 완료."
+          echo "🚀 안드로이드 부팅 완료."
           
-          echo "👑 관리자 권한(Root) 획득 시도..."
-          # 관리자 권한 요청 (실패해도 진행)
-          adb root || echo "⚠️ Root 실패 (이미 Root이거나 권한 없음, 계속 진행)"
-          
-          # Root 후 재연결 대기
+          echo "👑 관리자 권한 시도 (실패해도 진행)..."
+          adb root || true
           sleep 5
-          adb wait-for-device
           
-          echo "⏰ [설정] 시간 동기화 시도..."
-          # 실패하더라도 || echo 로 에러를 삼키고 넘어갑니다. (스크립트 중단 방지)
-          adb shell settings put global auto_time 0 || echo "⚠️ 시간 자동설정 해제 실패 (무시)"
-          adb shell date $(date +%m%d%H%M%Y.%S) || echo "⚠️ 날짜 설정 실패 (무시하고 진행)"
+          echo "⏰ 시간 설정 시도 (에러나면 무시)..."
+          adb shell settings put global auto_time 1 || true
           
           echo "💤 앱 초기화 대기 (60초)..."
           sleep 60
@@ -100,7 +88,7 @@ jobs:
           adb shell input keyevent 82
           adb shell input keyevent 3
           
-          echo "🏃‍♂️ 파이썬 스크립트 실행!"
+          echo "🏃‍♂️ 스크립트 실행!"
           mkdir -p screenshots
           python -u main.py
 
