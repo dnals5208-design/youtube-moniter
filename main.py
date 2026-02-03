@@ -18,7 +18,7 @@ REPEAT_COUNT = 10
 SCREENSHOT_DIR = "screenshots"
 
 # ==========================================
-# [기능] 구글 시트 연결 (초기화)
+# [기능] 구글 시트 연결
 # ==========================================
 def get_worksheet():
     try:
@@ -35,11 +35,9 @@ def get_worksheet():
         
         try:
             worksheet = sh.worksheet(sheet_name)
-            print(f"   ♻️ 기존 시트('{sheet_name}') 발견! 내용을 초기화합니다.")
             worksheet.clear() 
             worksheet.append_row(header)
         except:
-            print(f"   🆕 새 시트('{sheet_name}')를 생성합니다.")
             worksheet = sh.add_worksheet(title=sheet_name, rows="1000", cols="20")
             worksheet.append_row(header)
         return worksheet
@@ -74,29 +72,54 @@ def read_screen_text(d, filename=None):
         return ""
 
 # ==========================================
-# [기능] IP 확인 (크롬으로 직접 접속)
+# [기능] 크롬 초기 설정 강제 스킵 (ID 기반)
+# ==========================================
+def skip_chrome_welcome(d):
+    print("   🔨 크롬 설정 건너뛰기 (ID 기반)...")
+    d.app_start("com.android.chrome")
+    time.sleep(4)
+    
+    # 1. "동의 및 계속" 버튼 (ID로 찾기)
+    if d(resourceId="com.android.chrome:id/terms_accept").exists:
+        d(resourceId="com.android.chrome:id/terms_accept").click()
+        print("      -> 약관 동의 클릭")
+    
+    time.sleep(2)
+    
+    # 2. "동기화 사용 안함" 버튼 (ID로 찾기)
+    if d(resourceId="com.android.chrome:id/negative_button").exists:
+        d(resourceId="com.android.chrome:id/negative_button").click()
+        print("      -> 동기화 거절 클릭")
+    
+    time.sleep(2)
+    
+    # 3. 알림 권한 (시스템 팝업)
+    if d(text="No thanks").exists:
+        d(text="No thanks").click()
+    elif d(text="허용 안함").exists:
+        d(text="허용 안함").click()
+
+# ==========================================
+# [기능] IP 확인
 # ==========================================
 def check_ip_browser(d):
-    print("🌐 IP 위치 확인 중 (브라우저 접속)...")
+    print("🌐 IP 위치 확인 중...")
     
-    # 크롬 실행 및 IP 확인 사이트 접속
-    d.app_start("com.android.chrome")
-    time.sleep(5)
+    # 크롬 방해꾼 제거
+    skip_chrome_welcome(d)
     
-    # 주소창 입력 (딥링크)
+    # IP 사이트 접속
     d.shell('am start -a android.intent.action.VIEW -d "https://ipinfo.io/json" -p com.android.chrome')
     time.sleep(8)
     
-    # 화면 캡처 및 OCR
-    screen_text = read_screen_text(d, filename="ip_check_browser.png")
+    screen_text = read_screen_text(d, filename="ip_check_final.png")
     
-    # 결과 분석
     if "KR" in screen_text or "Korea" in screen_text:
-        print(f"   ✅ [성공] 한국 IP 화면 확인됨! ({screen_text[:30]}...)")
+        print(f"   ✅ [성공] 한국 IP 확인됨!")
     elif "US" in screen_text:
-        print(f"   ⚠️ [주의] 미국 IP가 보임 ({screen_text[:30]}...)")
+        print(f"   ⚠️ [주의] 아직 미국 IP입니다. (터널 실패)")
     else:
-        print(f"   ℹ️ IP 정보 화면 캡처 완료 (OCR 인식 대기)")
+        print(f"   ℹ️ 화면 내용: {screen_text[:30]}...")
 
 # ==========================================
 # [기능] 유튜브 실행
@@ -107,8 +130,7 @@ def setup_youtube(d):
     d.app_start("com.google.android.youtube")
     time.sleep(8)
     
-    # 팝업 닫기 (상황에 따라 다름)
-    d.click(0.5, 0.9) 
+    d.click(0.5, 0.9) # 팝업 닫기 시도
 
     print("   🕵️ 시크릿 모드 진입...")
     d.click(0.92, 0.05) 
@@ -133,10 +155,7 @@ def run_android_monitoring():
         os.system("adb wait-for-device")
         d = u2.connect(ADB_ADDR)
         
-        # 1. 브라우저로 IP 체크 (curl 안 씀)
         check_ip_browser(d)
-        
-        # 2. 유튜브 실행
         setup_youtube(d)
 
         for keyword in KEYWORDS:
