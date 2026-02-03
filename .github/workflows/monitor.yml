@@ -37,21 +37,19 @@ jobs:
         chmod 600 ~/.ssh/id_rsa
         
         echo "🔌 SSH 터널 연결 (0.0.0.0 바인딩)..."
-        # 에뮬레이터 접속 허용을 위해 0.0.0.0으로 바인딩
         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ExitOnForwardFailure=yes -4 -D 0.0.0.0:8080 -f -C -N -i ~/.ssh/id_rsa $ORACLE_USER@$ORACLE_HOST
         sleep 5
 
     - name: 🛡️ [진단] 호스트 IP 확인
       run: |
         echo "🌐 GitHub 호스트 IP 검사..."
-        # 1. 터널 테스트 (여기서 KR이 나와야 에뮬레이터도 됨)
         PROXY_IP=$(curl -s --socks5 127.0.0.1:8080 https://ipinfo.io/json)
         echo "   👉 터널 IP 정보: $PROXY_IP"
         
         if [[ "$PROXY_IP" == *"KR"* ]] || [[ "$PROXY_IP" == *"Korea"* ]]; then
           echo "✅ [호스트 성공] 서버 터널 정상! 한국 IP입니다."
         else
-          echo "❌ [호스트 실패] 터널 IP가 한국이 아닙니다. (서버 설정 확인 필요)"
+          echo "❌ [호스트 실패] 터널 IP가 한국이 아닙니다."
         fi
 
     - name: Enable KVM
@@ -63,20 +61,27 @@ jobs:
     - name: Run Android Emulator & Script
       uses: reactivecircus/android-emulator-runner@v2
       with:
-        # ★ API 29 (Android 10) : 프록시 호환성 최강
-        api-level: 29
+        # ★ [핵심] API 28 (Android 9 Pie) : 가장 가볍고 안정적임
+        api-level: 28
         target: default
         arch: x86_64
         profile: Nexus 6
         ram-size: 2048M
         heap-size: 512M
-        # 1. -dns-server 삭제 (자동 할당 사용)
-        # 2. Ping 테스트 삭제 (터널에서 안됨)
+        # 프록시 설정 유지
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-load -http-proxy socks5://127.0.0.1:8080 -prop persist.sys.language=ko -prop persist.sys.country=KR -prop persist.sys.locale=ko-KR
         
         script: |
-          echo "🚀 안드로이드 부팅 완료. (시스템 안정화 30초 대기)"
-          sleep 30
+          echo "🚀 안드로이드(API 28) 부팅 완료."
+          
+          echo "💤 시스템 안정화 대기 (60초)..."
+          sleep 60
+          
+          echo "🔓 화면 깨우기 & 잠금 해제 시도..."
+          adb shell input keyevent 82
+          adb shell input keyevent 82
+          adb shell input keyevent 3
+          sleep 5
           
           echo "🏃‍♂️ 스크립트 실행!"
           mkdir -p screenshots
