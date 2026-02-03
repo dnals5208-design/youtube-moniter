@@ -36,32 +36,20 @@ jobs:
         printf "%s\n" "$ORACLE_KEY" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
         
-        echo "🔌 SSH 터널 연결 시도 (0.0.0.0 바인딩)..."
-        # -D 0.0.0.0:8080 : 에뮬레이터가 외부에서 접속하는 것처럼 보여도 받아줌
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ExitOnForwardFailure=yes -4 -D 0.0.0.0:8080 -f -C -N -i ~/.ssh/id_rsa $ORACLE_USER@$ORACLE_HOST -v
-        
-        echo "⏳ 터널 안정화 대기 (5초)..."
+        echo "🔌 SSH 터널 연결 (SOCKS5)..."
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ExitOnForwardFailure=yes -4 -D 0.0.0.0:8080 -f -C -N -i ~/.ssh/id_rsa $ORACLE_USER@$ORACLE_HOST
         sleep 5
 
-    - name: 🛡️ [진단] 호스트 IP 먼저 확인 (중요)
+    - name: 🛡️ [진단] 호스트 IP 확인
       run: |
-        echo "🌐 GitHub Runner(호스트)에서 프록시 테스트 중..."
-        
-        # 1. 프록시 없이 (미국 IP 정상)
-        echo "   👉 원래 IP: $(curl -s https://ipinfo.io/json | grep ip)"
-        
-        # 2. 프록시 태워서 (한국 IP 나와야 함)
-        # 0.0.0.0으로 열었으니 127.0.0.1로 접속 테스트
+        echo "🌐 GitHub 호스트 IP 검사..."
         PROXY_IP=$(curl -s --socks5 127.0.0.1:8080 https://ipinfo.io/json)
-        echo "   👉 터널 적용 IP 데이터: $PROXY_IP"
-        
+        echo "   👉 결과: $PROXY_IP"
         if [[ "$PROXY_IP" == *"KR"* ]] || [[ "$PROXY_IP" == *"Korea"* ]]; then
-          echo "✅ [호스트 성공] 터널은 완벽하게 뚫렸습니다! 이제 에뮬레이터 차례입니다."
+          echo "✅ [호스트 성공] 서버 터널은 확실히 뚫렸습니다."
         else
-          echo "❌ [호스트 실패] 터널 자체가 안 뚫렸습니다. 서버 설정을 다시 봐야 합니다."
-          echo "   (응답: $PROXY_IP)"
-          # 터널이 안 되면 에뮬레이터도 안 되므로 여기서 멈추는 게 낫지만,
-          # 일단 강행해서 스크린샷이라도 봅니다.
+          echo "❌ [호스트 실패] 서버 설정 문제이거나 오라클 방화벽 문제입니다."
+          # 실패해도 에뮬레이터 로그를 보기 위해 계속 진행
         fi
 
     - name: Enable KVM
@@ -73,19 +61,23 @@ jobs:
     - name: Run Android Emulator & Script
       uses: reactivecircus/android-emulator-runner@v2
       with:
-        # ★ [핵심 변경] API 33 -> 29 (Android 10)
-        # 안드로이드 10은 프록시 말을 아주 잘 듣습니다.
-        api-level: 29
-        target: default
+        # ★ 안정적인 API 30 (Android 11) 사용
+        api-level: 30
+        target: google_apis
         arch: x86_64
         profile: Nexus 6
         ram-size: 2048M
         heap-size: 512M
-        # socks5://127.0.0.1:8080 설정을 안드로이드 10은 칼같이 지킵니다.
+        # 프록시 설정 유지
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -dns-server 8.8.8.8 -no-snapshot-load -http-proxy socks5://127.0.0.1:8080 -prop persist.sys.language=ko -prop persist.sys.country=KR -prop persist.sys.locale=ko-KR
         
         script: |
-          echo "🚀 안드로이드(API 29) 부팅 완료."
+          echo "🚀 안드로이드 부팅 완료. 인터넷 연결 대기 중..."
+          
+          # 인터넷 연결될 때까지 핑 테스트 (최대 60초 대기)
+          timeout 60s bash -c 'until adb shell ping -c 1 8.8.8.8 > /dev/null 2>&1; do echo "   ...인터넷 연결 대기 중"; sleep 2; done'
+          echo "✅ 안드로이드 인터넷 연결됨!"
+          
           mkdir -p screenshots
           python -u main.py
 
