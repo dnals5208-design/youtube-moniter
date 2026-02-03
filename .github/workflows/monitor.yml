@@ -48,6 +48,7 @@ jobs:
     - name: 🛡️ [진단] 호스트 IP 확인
       run: |
         echo "🌐 GitHub 호스트 IP 검사..."
+        # Privoxy를 통해 IP 확인
         HTTP_IP=$(curl -s -x http://127.0.0.1:8118 https://ipinfo.io/json)
         echo "   👉 Privoxy(8118) IP: $HTTP_IP"
         
@@ -74,19 +75,15 @@ jobs:
         ram-size: 2048M
         heap-size: 512M
         
-        # Privoxy 사용
-        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-load -http-proxy http://127.0.0.1:8118
+        # ★ [핵심] 여기서 부팅 옵션으로 언어 설정을 시도합니다. (강제 명령어가 아님)
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-load -http-proxy http://127.0.0.1:8118 -prop persist.sys.language=ko -prop persist.sys.country=KR -prop persist.sys.locale=ko-KR
         
         script: |
           echo "🚀 안드로이드(API 29) 부팅 완료."
           
-          echo "🇰🇷 [설정] 시스템 언어 한국어로 강제 변경..."
-          adb shell setprop persist.sys.language ko
-          adb shell setprop persist.sys.country KR
-          adb shell setprop persist.sys.locale ko-KR
-          
-          # 설정 적용을 위해 잠시 대기
-          sleep 5
+          # [수정] 에러를 유발하던 강제 언어 변경 명령어(setprop) 삭제함
+          # 대신 안전한 설정 변경(settings put)만 시도 (실패해도 무시)
+          adb shell settings put system system_locales ko-KR || echo "⚠️ 언어 설정 실패(무시함)"
           
           echo "💤 앱 초기화 대기 (60초)..."
           sleep 60
