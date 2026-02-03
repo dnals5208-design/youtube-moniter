@@ -74,42 +74,60 @@ def read_screen_text(d, filename=None):
         return ""
 
 # ==========================================
-# [기능] IP 확인 (크롬 + 팝업 닫기)
+# [기능] IP 확인 (명령어로 직접 확인 - 크롬 무시)
 # ==========================================
-def check_ip_and_setup(d):
-    print("🌐 인터넷 및 IP 위치 확인 중...")
+def check_ip_silent(d):
+    print("🌐 IP 위치 확인 중 (ADB 명령어)...")
     
+    # 1. 네트워크 패치
     d.shell("settings put global captive_portal_mode 0")
     d.shell("settings put global private_dns_mode off")
     
+    # 2. Curl 명령어로 IP 정보 직접 가져오기 (화면 X)
+    try:
+        # 15초 타임아웃
+        output = d.shell("curl -s --connect-timeout 15 https://ipinfo.io/json").output
+        
+        print(f"   📄 IP 응답 데이터: {output}")
+        
+        if "KR" in output or "Korea" in output:
+            print("   ✅ [성공] 한국 IP 확인됨! (Tunneling 정상)")
+        elif "US" in output:
+             print("   ⚠️ 미국 IP 잡힘 (프록시 무시됨)")
+        elif "Could not resolve" in output or "curl: (6)" in output:
+             print("   ❌ 인터넷 연결 안 됨 (터널 막힘)")
+        else:
+            print("   ⚠️ IP 정보 확인 불가 (응답값 이상)")
+            
+    except Exception as e:
+        print(f"   ❌ IP 확인 명령어 실패: {e}")
+
+# ==========================================
+# [기능] 크롬 'Welcome' 화면 스킵 (스마트 클릭)
+# ==========================================
+def skip_chrome_welcome(d):
+    print("   🔨 크롬 설정 건너뛰기...")
     d.app_start("com.android.chrome")
-    time.sleep(6)
+    time.sleep(3)
     
-    # 팝업 닫기 (Accept / No Thanks)
-    d.click(0.5, 0.9) # Accept
+    # "Accept & continue" 또는 "동의 및 계속" 버튼 텍스트로 찾기
+    if d(text="Accept & continue").exists:
+        d(text="Accept & continue").click()
+    elif d(text="동의 및 계속").exists:
+        d(text="동의 및 계속").click()
+    else:
+        # 못 찾으면 기존 좌표 클릭
+        d.click(0.5, 0.9)
     time.sleep(2)
-    d.click(0.25, 0.9) # No Thanks (좌측 하단)
-    time.sleep(2)
-    # 알림 권한 팝업 닫기
+    
+    # "No thanks" 또는 "사용 안함"
     if d(text="No thanks").exists:
         d(text="No thanks").click()
+    elif d(text="사용 안함").exists:
+        d(text="사용 안함").click()
     else:
-        d.click(0.3, 0.8)
-
-    # IP 확인
-    d.shell('am start -a android.intent.action.VIEW -d "https://ipinfo.io/json"')
-    time.sleep(10) 
-    
-    screen_text = read_screen_text(d, filename="ip_check.png")
-    
-    if "REFUSED" in screen_text or "reached" in screen_text:
-        print("\n🚨 [심각] SSH 터널 연결이 거부되었습니다!")
-        print("   -> 오라클 서버에서 'sudo iptables -F' 명령어를 꼭 입력하세요.\n")
-    
-    if "KR" in screen_text or "Korea" in screen_text:
-        print(f"   ✅ 한국 IP 확인됨! ({screen_text[:30]}...)")
-    else:
-        print(f"   ⚠️ 한국 IP 아님 ({screen_text[:30]}...)")
+        d.click(0.25, 0.9)
+    time.sleep(1)
 
 # ==========================================
 # [기능] 유튜브 실행
@@ -119,7 +137,9 @@ def setup_youtube(d):
     d.app_stop("com.google.android.youtube")
     d.app_start("com.google.android.youtube")
     time.sleep(8)
-    d.click(0.5, 0.9) # 팝업 닫기
+    
+    # 팝업 닫기
+    d.click(0.5, 0.9) 
 
     print("   🕵️ 시크릿 모드 진입...")
     d.click(0.92, 0.05) 
@@ -144,7 +164,13 @@ def run_android_monitoring():
         os.system("adb wait-for-device")
         d = u2.connect(ADB_ADDR)
         
-        check_ip_and_setup(d)
+        # 1. 화면 없이 IP 체크 (가장 정확함)
+        check_ip_silent(d)
+        
+        # 2. 크롬 설정 스킵 (혹시 나중에 필요할까봐)
+        skip_chrome_welcome(d)
+        
+        # 3. 유튜브 실행
         setup_youtube(d)
 
         for keyword in KEYWORDS:
@@ -157,9 +183,9 @@ def run_android_monitoring():
                 cmd = f'am start -a android.intent.action.VIEW -d "https://www.youtube.com/results?search_query={keyword}" -p com.google.android.youtube'
                 d.shell(cmd)
                 
-                time.sleep(8)
+                time.sleep(10)
                 
-                # 상단 스크린샷
+                # 상단 캡처
                 screen_text = read_screen_text(d, filename=f"{keyword}_{i}_top.png")
                 
                 d.swipe(500, 1500, 500, 500, 0.3) 
