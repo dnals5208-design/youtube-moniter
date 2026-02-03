@@ -35,7 +35,7 @@ def get_worksheet():
         
         try:
             worksheet = sh.worksheet(sheet_name)
-            print(f"   ♻️ 기존 시트('{sheet_name}') 발견! 초기화합니다.")
+            print(f"   ♻️ 기존 시트('{sheet_name}') 발견! 내용을 초기화합니다.")
             worksheet.clear() 
             worksheet.append_row(header)
         except:
@@ -74,7 +74,7 @@ def read_screen_text(d, filename=None):
         return ""
 
 # ==========================================
-# [기능] IP 확인 (크롬 + 팝업 정밀 타격)
+# [기능] IP 확인 (크롬 + 팝업 닫기)
 # ==========================================
 def check_ip_and_setup(d):
     print("🌐 인터넷 및 IP 위치 확인 중...")
@@ -85,35 +85,31 @@ def check_ip_and_setup(d):
     d.app_start("com.android.chrome")
     time.sleep(6)
     
-    # 1. Welcome 화면 (Accept)
-    d.click(0.5, 0.9) 
+    # 팝업 닫기 (Accept / No Thanks)
+    d.click(0.5, 0.9) # Accept
     time.sleep(2)
-    
-    # 2. 동기화 화면 (No Thanks - 좌측 하단)
-    d.click(0.25, 0.9) 
+    d.click(0.25, 0.9) # No Thanks (좌측 하단)
     time.sleep(2)
-
-    # 3. ★ 알림 권한 팝업 (No Thanks - 더 위쪽 좌측)
-    # 스크린샷 위치 기반 수정: 좌측 버튼 클릭
-    d.click(0.3, 0.8) 
-    time.sleep(1)
-    # 혹시 안 닫혔으면 'No thanks' 텍스트 클릭 시도
+    # 알림 권한 팝업 닫기
     if d(text="No thanks").exists:
         d(text="No thanks").click()
-    
-    # IP 확인 사이트
+    else:
+        d.click(0.3, 0.8)
+
+    # IP 확인
     d.shell('am start -a android.intent.action.VIEW -d "https://ipinfo.io/json"')
     time.sleep(10) 
     
     screen_text = read_screen_text(d, filename="ip_check.png")
     
     if "REFUSED" in screen_text or "reached" in screen_text:
-        print("\n🚨 [심각] SSH 터널 연결 실패! (IP 확인 불가)")
+        print("\n🚨 [심각] SSH 터널 연결이 거부되었습니다!")
+        print("   -> 오라클 서버에서 'sudo iptables -F' 명령어를 꼭 입력하세요.\n")
     
-    if "KR" in screen_text or "Korea" in screen_text or "South Korea" in screen_text:
-        print(f"   ✅ 한국 IP 확인됨! (내용: {screen_text[:30]}...)")
+    if "KR" in screen_text or "Korea" in screen_text:
+        print(f"   ✅ 한국 IP 확인됨! ({screen_text[:30]}...)")
     else:
-        print(f"   ⚠️ 한국 IP 아님 (내용: {screen_text[:30]}...)")
+        print(f"   ⚠️ 한국 IP 아님 ({screen_text[:30]}...)")
 
 # ==========================================
 # [기능] 유튜브 실행
@@ -123,17 +119,14 @@ def setup_youtube(d):
     d.app_stop("com.google.android.youtube")
     d.app_start("com.google.android.youtube")
     time.sleep(8)
-
-    # 팝업 닫기
-    d.click(0.5, 0.9) 
-    time.sleep(1)
+    d.click(0.5, 0.9) # 팝업 닫기
 
     print("   🕵️ 시크릿 모드 진입...")
     d.click(0.92, 0.05) 
     time.sleep(2)
     
     text = read_screen_text(d)
-    if "Secret" in text or "시크릿" in text or "Incognito" in text:
+    if "Secret" in text or "시크릿" in text:
         d.click(0.5, 0.3) 
     else:
         d.click(0.92, 0.05)
@@ -166,7 +159,7 @@ def run_android_monitoring():
                 
                 time.sleep(8)
                 
-                # 상단 캡처
+                # 상단 스크린샷
                 screen_text = read_screen_text(d, filename=f"{keyword}_{i}_top.png")
                 
                 d.swipe(500, 1500, 500, 500, 0.3) 
