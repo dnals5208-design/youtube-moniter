@@ -55,7 +55,7 @@ def append_to_sheet(worksheet, data):
             print(f"   ⚠️ 시트 저장 실패: {e}")
 
 # ==========================================
-# [기능] OCR 및 스크린샷
+# [기능] 화면 텍스트 읽기 (OCR)
 # ==========================================
 def read_screen_text(d, filename=None):
     try:
@@ -67,37 +67,38 @@ def read_screen_text(d, filename=None):
         
         text = pytesseract.image_to_string(Image.open(temp_path), lang='kor+eng')
         clean_text = " ".join(text.split())
+        
+        # 텍스트가 비어있으면(로딩중/흰화면) XML 덤프라도 시도
+        if not clean_text:
+            return ""
         return clean_text
     except Exception as e:
         return ""
 
 # ==========================================
-# [기능] 크롬 초기 설정 강제 스킵 (ID 기반)
+# [기능] 크롬 초기 설정 강제 스킵 (XML 분석)
 # ==========================================
 def skip_chrome_welcome(d):
-    print("   🔨 크롬 설정 건너뛰기 (ID 기반)...")
+    print("   🔨 크롬 설정 건너뛰기 (스마트 감지)...")
     d.app_start("com.android.chrome")
-    time.sleep(4)
+    time.sleep(5)
     
-    # 1. "동의 및 계속" 버튼 (ID로 찾기)
-    if d(resourceId="com.android.chrome:id/terms_accept").exists:
-        d(resourceId="com.android.chrome:id/terms_accept").click()
-        print("      -> 약관 동의 클릭")
+    # UI 계층구조 덤프 (버튼 찾기용)
+    xml = d.dump_hierarchy()
     
-    time.sleep(2)
-    
-    # 2. "동기화 사용 안함" 버튼 (ID로 찾기)
-    if d(resourceId="com.android.chrome:id/negative_button").exists:
-        d(resourceId="com.android.chrome:id/negative_button").click()
-        print("      -> 동기화 거절 클릭")
+    # "Accept" 또는 "동의" 버튼이 보이면 클릭
+    if "Accept" in xml or "동의" in xml:
+        print("      -> 약관 동의 버튼 발견 및 클릭")
+        d(resourceId="com.android.chrome:id/terms_accept").click_exists(timeout=2)
+        d(text="Accept & continue").click_exists(timeout=2)
     
     time.sleep(2)
     
-    # 3. 알림 권한 (시스템 팝업)
-    if d(text="No thanks").exists:
-        d(text="No thanks").click()
-    elif d(text="허용 안함").exists:
-        d(text="허용 안함").click()
+    # "No thanks" 또는 "사용 안함"
+    if "No thanks" in xml or "사용 안함" in xml:
+        print("      -> 동기화 거절 버튼 발견 및 클릭")
+        d(resourceId="com.android.chrome:id/negative_button").click_exists(timeout=2)
+        d(text="No thanks").click_exists(timeout=2)
 
 # ==========================================
 # [기능] IP 확인
@@ -105,21 +106,22 @@ def skip_chrome_welcome(d):
 def check_ip_browser(d):
     print("🌐 IP 위치 확인 중...")
     
-    # 크롬 방해꾼 제거
     skip_chrome_welcome(d)
     
     # IP 사이트 접속
     d.shell('am start -a android.intent.action.VIEW -d "https://ipinfo.io/json" -p com.android.chrome')
-    time.sleep(8)
+    time.sleep(10) # 로딩 시간 충분히 줌
     
-    screen_text = read_screen_text(d, filename="ip_check_final.png")
+    screen_text = read_screen_text(d, filename="ip_check_result.png")
     
     if "KR" in screen_text or "Korea" in screen_text:
         print(f"   ✅ [성공] 한국 IP 확인됨!")
     elif "US" in screen_text:
-        print(f"   ⚠️ [주의] 아직 미국 IP입니다. (터널 실패)")
+        print(f"   ⚠️ [주의] 미국 IP입니다. (터널 실패)")
     else:
-        print(f"   ℹ️ 화면 내용: {screen_text[:30]}...")
+        # 화면이 하얗거나 인식이 안 된 경우
+        print(f"   ❌ [오류] IP 정보 인식 불가. (화면이 로딩 중이거나 인터넷 끊김)")
+        print(f"       -> 인식된 텍스트: '{screen_text}'")
 
 # ==========================================
 # [기능] 유튜브 실행
@@ -130,19 +132,22 @@ def setup_youtube(d):
     d.app_start("com.google.android.youtube")
     time.sleep(8)
     
-    d.click(0.5, 0.9) # 팝업 닫기 시도
+    d.click(0.5, 0.9) 
 
     print("   🕵️ 시크릿 모드 진입...")
     d.click(0.92, 0.05) 
     time.sleep(2)
     
-    text = read_screen_text(d)
-    if "Secret" in text or "시크릿" in text:
-        d.click(0.5, 0.3) 
+    # 시크릿 모드 메뉴 찾기 (좌표 대신 텍스트로)
+    if d(text="Turn on Incognito").exists:
+        d(text="Turn on Incognito").click()
+    elif d(text="시크릿 모드 사용").exists:
+        d(text="시크릿 모드 사용").click()
     else:
+        # 못 찾으면 좌표 클릭 (비상용)
         d.click(0.92, 0.05)
         time.sleep(1)
-        d.click(0.5, 0.35) 
+        d.click(0.5, 0.35)
     
     time.sleep(4)
     d.click(0.5, 0.9) 
@@ -168,7 +173,7 @@ def run_android_monitoring():
                 cmd = f'am start -a android.intent.action.VIEW -d "https://www.youtube.com/results?search_query={keyword}" -p com.google.android.youtube'
                 d.shell(cmd)
                 
-                time.sleep(10)
+                time.sleep(10) # 검색 결과 로딩 대기
                 
                 # 상단 캡처
                 screen_text = read_screen_text(d, filename=f"{keyword}_{i}_top.png")
@@ -179,7 +184,9 @@ def run_android_monitoring():
                 is_ad = "X"
                 ad_text = "-"
                 
-                if "광고" in screen_text or "Ad" in screen_text or "Sponsored" in screen_text:
+                if not screen_text:
+                    print(f"❌ [오류] 화면 인식 실패 (빈 화면)")
+                elif "광고" in screen_text or "Ad" in screen_text or "Sponsored" in screen_text:
                     is_ad = "O"
                     ad_text = "광고 발견"
                     for k in ["해커스", "에듀윌", "공단기", "메가", "경단기", "소방", "야나두", "시원스쿨", "YBM", "Hackers"]:
@@ -188,7 +195,7 @@ def run_android_monitoring():
                             break
                     print(f"🚨 발견! ({ad_text})")
                 else:
-                    print(f"❌ 없음 (인식: {screen_text[:20]}...)")
+                    print(f"❌ 없음 (인식: {screen_text[:15]}...)")
                 
                 result_data = {
                     "날짜": datetime.now().strftime('%Y-%m-%d'),
