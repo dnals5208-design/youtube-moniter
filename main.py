@@ -55,73 +55,111 @@ def read_screen_text(d, filename=None):
         return " ".join(text.split())
     except: return ""
 
-# ★ [핵심] 웰컴 화면/로그인 화면 무조건 패스
-def handle_welcome_screens(d):
-    # 크롬/유튜브 공통 약관 동의
+def handle_google_blockers(d):
+    """크롬/유튜브의 각종 로그인/약관 방해꾼을 처리"""
+    # 1. 크롬 약관 (Accept & continue)
     if d(text="Accept & continue").exists:
-        print("   🔨 약관 동의(Accept) 클릭")
+        print("   🔨 [방해꾼] 약관 동의 클릭")
         d(text="Accept & continue").click()
         time.sleep(2)
     
-    # 로그인 거절 (No thanks)
+    # 2. 크롬 로그인 권유 (No thanks / Use without account)
     if d(text="No thanks").exists:
-        print("   🔨 로그인 거절(No thanks) 클릭")
+        print("   🔨 [방해꾼] No thanks 클릭")
         d(text="No thanks").click()
-        time.sleep(2)
-
-    # 유튜브 프리미엄 건너뛰기
+    elif d(resourceId="com.android.chrome:id/negative_button").exists:
+        print("   🔨 [방해꾼] 거절 버튼(ID) 클릭")
+        d(resourceId="com.android.chrome:id/negative_button").click()
+    elif d(text="Use without an account").exists:
+        print("   🔨 [방해꾼] 계정 없이 사용 클릭")
+        d(text="Use without an account").click()
+        
+    # 3. 유튜브 프리미엄/로그인 팝업
     if d(text="Skip trial").exists: d(text="Skip trial").click()
     if d(text="무료 체험 건너뛰기").exists: d(text="무료 체험 건너뛰기").click()
+    if d(text="나중에").exists: d(text="나중에").click()
 
-def setup_youtube_pure_app(d):
-    print("   🔨 유튜브 앱 실행 및 시크릿 모드 진입...")
-    
-    # 1. 크롬 죽이고 유튜브 실행
+def check_ip_browser(d):
+    print("🌐 IP 확인 (크롬 실행 중)...")
     d.shell("am force-stop com.android.chrome")
-    d.app_start("com.google.android.youtube", stop=True)
+    d.app_start("com.android.chrome", stop=True)
+    time.sleep(5)
+    
+    # 방해꾼 1차 제거
+    handle_google_blockers(d)
+    
+    # URL 이동
+    d.shell('am start -a android.intent.action.VIEW -d "https://ipinfo.io/json" -p com.android.chrome')
+    time.sleep(8)
+    
+    # 방해꾼 2차 제거 (혹시 사이트 들어가려는데 또 떴을까봐)
+    handle_google_blockers(d)
+    
+    # ★ 요청하신 스크린샷 무조건 찍기
+    print("📸 IP 확인 화면 캡처 중...")
+    ip_text = read_screen_text(d, filename="DEBUG_IP_CHECK.png")
+    
+    if "KR" in ip_text or "Korea" in ip_text:
+        print(f"   ✅ [IP확인 성공] 한국 IP 감지됨")
+    else:
+        print(f"   ⚠️ [IP확인 실패] 인식된 텍스트: {ip_text[:50]}...")
+        # 실패했어도 죽지 않고 넘어갑니다. (유튜브가 중요하니까)
+
+def setup_youtube_force(d):
+    print("   🔨 유튜브 메인 화면 강제 진입...")
+    d.shell("am force-stop com.android.chrome")
+    d.shell("am force-stop com.google.android.youtube")
+    time.sleep(2)
+    
+    # ★ [핵심] 그냥 실행이 아니라 '메인 액티비티'를 콕 집어서 실행
+    # 이렇게 하면 팝업 위로 메인 화면이 뜰 확률이 높음
+    d.shell("am start -n com.google.android.youtube/com.google.android.apps.youtube.app.WatchWhileActivity")
     time.sleep(10)
     
-    # 2. 방해꾼 제거
-    handle_welcome_screens(d)
+    handle_google_blockers(d)
     
-    # 3. 시크릿 모드 진입 시도 (최대 3회 재시도)
-    for attempt in range(3):
-        print(f"   🕵️ 시크릿 모드 진입 시도 ({attempt+1}/3)...")
-        
-        # 이미 시크릿 모드인지 확인 (상단에 'Incognito' 아이콘 혹은 텍스트)
-        if d(description="Incognito profile").exists:
-             print("   ✅ 이미 시크릿 모드입니다.")
-             return
-
-        # 프로필 아이콘 클릭
-        if d(resourceId="com.google.android.youtube:id/mobile_user_account_image").exists:
-            d(resourceId="com.google.android.youtube:id/mobile_user_account_image").click()
-        elif d(description="Account").exists:
-            d(description="Account").click()
-        else:
-            # 못 찾으면 우상단 좌표 클릭
-            d.click(0.92, 0.05)
-        
-        time.sleep(2)
-        
-        # 메뉴 클릭
-        if d(resourceId="com.google.android.youtube:id/new_incognito_session_item").exists:
-            d(resourceId="com.google.android.youtube:id/new_incognito_session_item").click()
-            print("   ✅ 시크릿 모드 버튼 클릭 완료")
-            time.sleep(5)
-            # Got it 처리
-            if d(text="Got it").exists: d(text="Got it").click()
-            return
-        elif d(text="Turn on Incognito").exists:
-            d(text="Turn on Incognito").click()
-            print("   ✅ Turn on Incognito 클릭 완료")
-            time.sleep(5)
-            if d(text="Got it").exists: d(text="Got it").click()
-            return
-            
-        # 메뉴가 안 보이면 닫고 다시 시도
+    # 앱이 떴는지 패키지 확인
+    current = d.app_current()
+    print(f"   ℹ️ 현재 실행 중인 앱: {current['package']}")
+    
+    if current['package'] != "com.google.android.youtube":
+        print("   ⚠️ 유튜브가 아님 (로그인 창 등). 뒤로가기 3번 연타로 탈출 시도...")
         d.press("back")
         time.sleep(1)
+        d.press("back")
+        time.sleep(1)
+        d.press("back")
+        time.sleep(2)
+        # 다시 실행
+        d.shell("am start -n com.google.android.youtube/com.google.android.apps.youtube.app.WatchWhileActivity")
+        time.sleep(8)
+
+    # 시크릿 모드 진입
+    print("   🕵️ 시크릿 모드 진입 시도...")
+    # 1. 프로필 아이콘 (ID 우선)
+    if d(resourceId="com.google.android.youtube:id/mobile_user_account_image").exists:
+        d(resourceId="com.google.android.youtube:id/mobile_user_account_image").click()
+    elif d(description="Account").exists:
+        d(description="Account").click()
+    elif d(description="계정").exists:
+        d(description="계정").click()
+    else:
+        # 못 찾으면 우상단 좌표
+        d.click(0.92, 0.05)
+    
+    time.sleep(2)
+    
+    # 2. 메뉴 선택
+    if d(resourceId="com.google.android.youtube:id/new_incognito_session_item").exists:
+        d(resourceId="com.google.android.youtube:id/new_incognito_session_item").click()
+    elif d(text="Turn on Incognito").exists:
+        d(text="Turn on Incognito").click()
+    elif d(text="시크릿 모드 사용").exists:
+        d(text="시크릿 모드 사용").click()
+    
+    time.sleep(4)
+    if d(text="Got it").exists: d(text="Got it").click()
+    if d(text="확인").exists: d(text="확인").click()
 
 def run_android_monitoring():
     ws = get_worksheet()
@@ -131,21 +169,11 @@ def run_android_monitoring():
         os.system("adb wait-for-device")
         d = u2.connect(ADB_ADDR)
         
-        # IP 체크 (크롬 웰컴 스크린 처리 포함)
-        print("🌐 IP 확인 (크롬)...")
-        d.app_start("com.android.chrome", stop=True)
-        time.sleep(5)
-        handle_welcome_screens(d) # 여기서 Welcome to Chrome 처리
-        d.shell('am start -a android.intent.action.VIEW -d "https://ipinfo.io/json"')
-        time.sleep(8)
-        ip_text = read_screen_text(d, filename="ip_check.png")
-        if "KR" in ip_text or "Korea" in ip_text:
-            print("   ✅ [IP확인] 한국 IP 맞음")
-        else:
-            print(f"   ℹ️ [IP확인] 텍스트: {ip_text[:50]}...")
-
-        # 유튜브 앱 세팅
-        setup_youtube_pure_app(d)
+        # 1. IP 확인 (스크린샷 저장)
+        check_ip_browser(d)
+        
+        # 2. 유튜브 준비
+        setup_youtube_force(d)
 
         for keyword in KEYWORDS:
             print(f"\n🔎 [{keyword}] 검색 시작")
@@ -154,21 +182,24 @@ def run_android_monitoring():
                 sys.stdout.flush()
                 print(f"   [{i}/{REPEAT_COUNT}] 진행 중...", end=" ")
                 
-                # 앱 튕김 방지 (유튜브 아니면 재실행)
-                if d.app_current()['package'] != "com.google.android.youtube":
-                    print("⚠️ 유튜브 앱 아님. 재실행...")
-                    d.app_start("com.google.android.youtube")
+                # ★ 앱 이탈 방지 로직 강화
+                current = d.app_current()
+                if current['package'] != "com.google.android.youtube":
+                    print(f"⚠️ 앱 이탈 감지 (현재: {current['package']}). 유튜브 복귀...")
+                    d.shell("am start -n com.google.android.youtube/com.google.android.apps.youtube.app.WatchWhileActivity")
                     time.sleep(5)
 
-                # 검색 버튼 클릭 (ID 기반)
+                # 검색 버튼 클릭
                 if d(resourceId="com.google.android.youtube:id/menu_item_search").exists:
                     d(resourceId="com.google.android.youtube:id/menu_item_search").click()
                 elif d(description="Search").exists:
                     d(description="Search").click()
+                elif d(description="검색").exists:
+                    d(description="검색").click()
                 else:
-                    print("❌ 검색 버튼 못 찾음")
-                    d.press("back") # 혹시 이상한 화면일까봐
-                    continue
+                    # 검색 버튼이 없으면 이미 검색창이거나, 홈이 아닐 수 있음 -> 좌표 클릭 시도 (최후의 수단)
+                    print("❌ 검색 버튼 ID 못 찾음. 좌표 클릭 시도.")
+                    d.click(0.85, 0.05) # 우상단
                 
                 time.sleep(2)
                 d.clear_text()
@@ -177,16 +208,17 @@ def run_android_monitoring():
                 d.press("enter")
                 time.sleep(8)
                 
+                # 결과 캡처
                 screen_text = read_screen_text(d, filename=f"{keyword}_{i}_top.png")
                 
-                # 방해 팝업(로그인, Welcome) 처리
-                if any(x in screen_text for x in ["Sign in", "Welcome", "Verify", "Account"]):
-                    print("🧹 [청소] 팝업 감지 -> 뒤로가기")
+                # 로그인 방해꾼 청소
+                if any(x in screen_text for x in ["Sign in", "Google", "Account", "Verify", "인증"]):
+                    print("🧹 [청소] 로그인 팝업 -> 뒤로가기")
                     d.press("back")
                     time.sleep(2)
                     screen_text = read_screen_text(d, filename=f"{keyword}_{i}_retry.png")
 
-                # 결과 저장 로직
+                # 스크롤 & 광고 판별
                 d.swipe(500, 1500, 500, 500, 0.3) 
                 time.sleep(2)
                 
@@ -210,7 +242,7 @@ def run_android_monitoring():
                 }
                 append_to_sheet(ws, result_data)
                 
-                # 홈으로 복귀
+                # 홈으로 복귀 (뒤로가기 2번)
                 d.press("back")
                 time.sleep(1)
                 d.press("back")
