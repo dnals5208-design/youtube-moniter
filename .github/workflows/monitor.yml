@@ -17,7 +17,7 @@ jobs:
       with:
         python-version: '3.10'
 
-    - name: Install System Dependencies (OCR & Tools)
+    - name: Install System Dependencies (OCR)
       run: |
         sudo apt-get update
         sudo apt-get install -y tesseract-ocr tesseract-ocr-kor libtesseract-dev net-tools
@@ -26,43 +26,33 @@ jobs:
       run: |
         pip install pandas uiautomator2 gspread oauth2client pytesseract Pillow
 
-    - name: Setup SSH Tunnel (Auto-Detect User)
+    - name: Setup SSH Tunnel & Verify (Korea IP)
       env:
         ORACLE_KEY: ${{ secrets.ORACLE_KEY }}
         ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+        ORACLE_USER: ${{ secrets.ORACLE_USER }}
       run: |
         mkdir -p ~/.ssh
         printf "%s\n" "$ORACLE_KEY" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
         
-        # 함수: 터널 연결 시도
-        connect_tunnel() {
-          USER=$1
-          echo "🔌 접속 시도: $USER@$ORACLE_HOST ..."
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -4 -D 8080 -f -C -N -i ~/.ssh/id_rsa $USER@$ORACLE_HOST
-          sleep 5
-          # 연결 확인 (구글 접속 테스트)
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --socks5-hostname 127.0.0.1:8080 --connect-timeout 5 https://www.google.com || echo "FAIL")
-          if [ "$HTTP_CODE" == "200" ]; then
-            echo "✅ 성공! 아이디는 '$USER' 였습니다."
-            return 0
-          else
-            echo "❌ 실패 (응답코드: $HTTP_CODE)"
-            # 실패 시 백그라운드 ssh 프로세스 정리
-            pkill ssh || true
-            return 1
-          fi
-        }
-
-        # 1. ubuntu로 시도
-        if connect_tunnel "ubuntu"; then
-          echo "TUNNEL_READY=true" >> $GITHUB_ENV
-        # 2. 실패하면 opc로 시도
-        elif connect_tunnel "opc"; then
-          echo "TUNNEL_READY=true" >> $GITHUB_ENV
+        echo "🔌 SSH 터널 연결 시도 (ID: $ORACLE_USER)..."
+        # 터널 생성 (SOCKS5 8080포트)
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -4 -D 8080 -f -C -N -i ~/.ssh/id_rsa $ORACLE_USER@$ORACLE_HOST -v
+        
+        echo "⏳ 터널 안정화 대기 (5초)..."
+        sleep 5
+        
+        echo "🌐 [진단] 호스트에서 구글 접속 테스트..."
+        # GitHub 컴퓨터가 먼저 터널을 통해 구글에 접속해봅니다.
+        # 여기서 안 되면 안드로이드도 절대 안 됩니다.
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --socks5-hostname 127.0.0.1:8080 --connect-timeout 10 https://www.google.com || echo "FAIL")
+        
+        if [ "$HTTP_CODE" == "200" ]; then
+          echo "✅ 터널 연결 성공! (구글 접속 확인됨)"
         else
-          echo "❌ [치명적 오류] ubuntu, opc 둘 다 접속 실패!"
-          echo "SSH Key가 잘못되었거나, 오라클 인스턴스가 꺼져있을 수 있습니다."
+          echo "❌ 터널 연결 실패! (응답: $HTTP_CODE)"
+          echo "👉 해결책: 오라클 서버 터미널에서 'sudo iptables -F' 명령어를 입력했는지 확인하세요."
           exit 1
         fi
 
@@ -81,11 +71,11 @@ jobs:
         profile: Nexus 6
         ram-size: 2048M
         heap-size: 512M
-        # 한국어 강제 설정 + 프록시 연결
+        # 한국어 강제 + 프록시 설정
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -dns-server 8.8.8.8 -no-snapshot-load -http-proxy 127.0.0.1:8080 -prop persist.sys.language=ko -prop persist.sys.country=KR -prop persist.sys.locale=ko-KR
         
         script: |
-          echo "🚀 안드로이드(한국어) 부팅 완료. 파이썬 스크립트 실행!"
+          echo "🚀 안드로이드 부팅 완료. 파이썬 스크립트 실행!"
           mkdir -p screenshots
           python -u main.py
 
