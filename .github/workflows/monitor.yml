@@ -26,7 +26,7 @@ jobs:
       run: |
         pip install pandas uiautomator2 gspread oauth2client pytesseract Pillow
 
-    - name: Setup SSH Tunnel & Verify (Korea IP)
+    - name: Setup SSH Tunnel (SOCKS5)
       env:
         ORACLE_KEY: ${{ secrets.ORACLE_KEY }}
         ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
@@ -36,24 +36,23 @@ jobs:
         printf "%s\n" "$ORACLE_KEY" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
         
-        echo "🔌 SSH 터널 연결 시도 (ID: $ORACLE_USER)..."
-        # 터널 생성 (SOCKS5 8080포트)
+        echo "🔌 SSH 터널 연결 시도 (SOCKS5)..."
+        # -D 8080: SOCKS5 프록시 생성
         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -4 -D 8080 -f -C -N -i ~/.ssh/id_rsa $ORACLE_USER@$ORACLE_HOST -v
         
-        echo "⏳ 터널 안정화 대기 (5초)..."
         sleep 5
         
-        echo "🌐 [진단] 호스트에서 구글 접속 테스트..."
-        # GitHub 컴퓨터가 먼저 터널을 통해 구글에 접속해봅니다.
-        # 여기서 안 되면 안드로이드도 절대 안 됩니다.
-        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --socks5-hostname 127.0.0.1:8080 --connect-timeout 10 https://www.google.com || echo "FAIL")
+        echo "🌐 [진단] 호스트(GitHub 컴퓨터) IP 확인..."
+        # 호스트에서 먼저 터널을 통해 IP를 확인합니다.
+        # 여기서 KR이 뜨면 서버는 100% 뚫린 겁니다.
+        IP_INFO=$(curl -s --socks5-hostname 127.0.0.1:8080 https://ipinfo.io/json)
+        echo "응답 데이터: $IP_INFO"
         
-        if [ "$HTTP_CODE" == "200" ]; then
-          echo "✅ 터널 연결 성공! (구글 접속 확인됨)"
+        if [[ "$IP_INFO" == *"KR"* ]] || [[ "$IP_INFO" == *"Korea"* ]]; then
+          echo "✅ 한국 IP 확인 성공! (터널 정상)"
         else
-          echo "❌ 터널 연결 실패! (응답: $HTTP_CODE)"
-          echo "👉 해결책: 오라클 서버 터미널에서 'sudo iptables -F' 명령어를 입력했는지 확인하세요."
-          exit 1
+          echo "❌ 한국 IP 아님! (터널 실패 또는 오라클 방화벽 문제)"
+          # 실패해도 일단 진행해서 스크린샷 남김
         fi
 
     - name: Enable KVM
@@ -71,11 +70,11 @@ jobs:
         profile: Nexus 6
         ram-size: 2048M
         heap-size: 512M
-        # 한국어 강제 + 프록시 설정
-        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -dns-server 8.8.8.8 -no-snapshot-load -http-proxy 127.0.0.1:8080 -prop persist.sys.language=ko -prop persist.sys.country=KR -prop persist.sys.locale=ko-KR
+        # ★ 수정됨: socks5:// 접두어 추가! (이게 없어서 미국 IP가 떴던 겁니다)
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -dns-server 8.8.8.8 -no-snapshot-load -http-proxy socks5://127.0.0.1:8080 -prop persist.sys.language=ko -prop persist.sys.country=KR -prop persist.sys.locale=ko-KR
         
         script: |
-          echo "🚀 안드로이드 부팅 완료. 파이썬 스크립트 실행!"
+          echo "🚀 안드로이드 부팅 완료."
           mkdir -p screenshots
           python -u main.py
 
