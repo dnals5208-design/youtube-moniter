@@ -3,7 +3,7 @@ name: Real App Monitor
 on:
   workflow_dispatch:
   schedule:
-    - cron: '30 5 * * *' # 한국 14:30
+    - cron: '30 5 * * *' # 한국 시간 14:30
 
 jobs:
   monitor:
@@ -17,21 +17,22 @@ jobs:
       with:
         python-version: '3.10'
 
-    - name: Install Dependencies
+    - name: Install Dependencies (System)
       run: |
         sudo apt-get update
         sudo apt-get install -y tesseract-ocr tesseract-ocr-kor libtesseract-dev net-tools privoxy
 
-    - name: Configure Privoxy
+    - name: Configure Privoxy (SOCKS5 -> HTTP Bridge)
       run: |
         echo 'forward-socks5t / 127.0.0.1:8080 .' | sudo tee -a /etc/privoxy/config
         sudo service privoxy restart
 
-    - name: Install Libraries
+    - name: Install Python Libraries
       run: |
-        pip install pandas uiautomator2 gspread oauth2client pytesseract Pillow
+        # adbutils, uiautomator2 등 필수 라이브러리 명시
+        pip install pandas uiautomator2 adbutils gspread oauth2client pytesseract Pillow
 
-    - name: Setup SSH Tunnel
+    - name: Setup SSH Tunnel (Oracle Cloud)
       env:
         ORACLE_KEY: ${{ secrets.ORACLE_KEY }}
         ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
@@ -40,17 +41,19 @@ jobs:
         mkdir -p ~/.ssh
         printf "%s\n" "$ORACLE_KEY" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
+        # SOCKS5 터널링 (8080 포트)
         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ExitOnForwardFailure=yes -4 -D 8080 -f -C -N -i ~/.ssh/id_rsa $ORACLE_USER@$ORACLE_HOST
         sleep 5
 
-    - name: 🛡️ [진단] 호스트 IP 확인
+    - name: 🛡️ [Diagnostics] Host IP Check
       run: |
+        # Privoxy를 통해 IP 확인
         HTTP_IP=$(curl -s -x http://127.0.0.1:8118 https://ipinfo.io/json)
         echo "   👉 Privoxy IP: $HTTP_IP"
         if [[ "$HTTP_IP" == *"KR"* ]] || [[ "$HTTP_IP" == *"Korea"* ]]; then
-          echo "✅ [성공] 한국 IP 확인됨!"
+          echo "✅ [Success] Korean IP confirmed!"
         else
-          echo "❌ [실패] 한국 IP가 아닙니다."
+          echo "❌ [Fail] IP is not Korean. Check server."
           exit 1
         fi
 
@@ -69,24 +72,25 @@ jobs:
         profile: Nexus 6
         ram-size: 2048M
         heap-size: 512M
+        # 프록시를 Privoxy(8118)로 설정 + 한국어 설정 시도
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-load -http-proxy http://127.0.0.1:8118 -prop persist.sys.language=ko -prop persist.sys.country=KR -prop persist.sys.locale=ko-KR
         
         script: |
-          echo "🚀 안드로이드 부팅 완료."
+          echo "🚀 Android Booted."
           
-          echo "⏰ [설정] 시간 자동 동기화 켜기..."
-          # 관리자 권한 없이도 가능한 설정입니다.
+          echo "⏰ Enabling Auto-Time (Fix SSL/400 Errors)..."
+          # 관리자 권한 없이도 가능한 시간 동기화 설정
           adb shell settings put global auto_time 1
           adb shell settings put global auto_time_zone 1
           
-          echo "💤 앱 초기화 및 시간 동기화 대기 (60초)..."
+          echo "💤 Waiting for app initialization (60s)..."
           sleep 60
           
-          echo "🔓 화면 깨우기..."
+          echo "🔓 Unlocking Screen..."
           adb shell input keyevent 82
           adb shell input keyevent 3
           
-          echo "🏃‍♂️ 스크립트 실행!"
+          echo "🏃‍♂️ Running Main Script..."
           mkdir -p screenshots
           python -u main.py
 
