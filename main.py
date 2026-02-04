@@ -56,23 +56,22 @@ def read_screen_text(d, filename=None):
     except: return ""
 
 def nuke_popups(d):
-    """모든 방해 팝업 제거"""
+    """방해꾼 제거"""
     try:
         # 1. 크롬/구글 로그인
         if d(textContains="Accept").exists: d(textContains="Accept").click()
         if d(textContains="No thanks").exists: d(textContains="No thanks").click()
         if d(textContains="No Thanks").exists: d(textContains="No Thanks").click()
-        if d(resourceId="com.android.chrome:id/negative_button").exists: d(resourceId="com.android.chrome:id/negative_button").click()
         
         # 2. 키보드 팝업
         if d(textContains="better keyboard").exists:
             d(textContains="No").click()
         
-        # 3. 400 에러 (RETRY)
+        # 3. 400 에러 (보이면 RETRY)
         if d(text="RETRY").exists:
-            print("   ⚠️ [오류] 400 에러 -> RETRY 클릭")
+            print("   ⚠️ [오류] 400 에러 발견 -> RETRY 클릭")
             d(text="RETRY").click()
-            time.sleep(3)
+            time.sleep(2)
 
         # 4. 기타
         if d(text="Skip trial").exists: d(text="Skip trial").click()
@@ -81,10 +80,29 @@ def nuke_popups(d):
     except: pass
 
 # ==========================================
-# [1단계] IP 확인
+# [기능] 네트워크 심폐소생술 (비행기 모드)
+# ==========================================
+def reset_network(d):
+    print("   ✈️ 네트워크 초기화 (비행기 모드 ON/OFF)...")
+    # 비행기 모드 ON
+    d.shell("settings put global airplane_mode_on 1")
+    d.shell("am broadcast -a android.intent.action.AIRPLANE_MODE --ez state true")
+    time.sleep(3)
+    # 비행기 모드 OFF
+    d.shell("settings put global airplane_mode_on 0")
+    d.shell("am broadcast -a android.intent.action.AIRPLANE_MODE --ez state false")
+    time.sleep(5)
+    print("   ✅ 네트워크 재연결 완료")
+
+# ==========================================
+# [1단계] IP 확인 (선 청소 -> 후 접속)
 # ==========================================
 def check_ip_browser(d):
     print("🌐 IP 확인 시작...")
+    
+    # 브라우저 켜기 전에도 네트워크 한번 리셋
+    reset_network(d)
+    
     d.shell("am force-stop com.android.chrome")
     d.app_start("com.android.chrome", stop=True)
     time.sleep(5)
@@ -92,18 +110,18 @@ def check_ip_browser(d):
     nuke_popups(d)
     d.shell('am start -a android.intent.action.VIEW -d "https://ipinfo.io/json" -p com.android.chrome')
     
-    print("   ⏳ 로딩 대기 (15초)...")
-    time.sleep(15)
-    nuke_popups(d)
+    print("   ⏳ 로딩 대기 (20초)...") 
+    time.sleep(20)
     
+    nuke_popups(d)
     print("📸 IP 확인 화면 캡처")
-    read_screen_text(d, filename="DEBUG_IP_CHECK.png")
+    read_screen_text(d, filename="DEBUG_1_IP_CHECK.png")
 
 # ==========================================
-# [2단계] 유튜브 준비 (스크린샷 추가)
+# [2단계] 유튜브 준비
 # ==========================================
 def setup_youtube(d):
-    print("   🧹 유튜브 앱 데이터 초기화...")
+    print("   🧹 유튜브 앱 데이터 완전 초기화...")
     d.shell("pm clear com.google.android.youtube") 
     time.sleep(2)
     
@@ -111,25 +129,29 @@ def setup_youtube(d):
     d.shell("am start -n com.google.android.youtube/com.google.android.apps.youtube.app.WatchWhileActivity")
     time.sleep(10)
     
-    # ★ 요청 1: 유튜브 켜자마자 스크린샷
-    print("📸 [디버그] 유튜브 시작 화면 저장")
-    d.screenshot(os.path.join(SCREENSHOT_DIR, "DEBUG_1_YOUTUBE_START.png"))
+    # 실행 직후 400 에러 뜨면 네트워크 리셋 시도
+    screen_text = read_screen_text(d)
+    if "400" in screen_text or "problem" in screen_text:
+        print("   🚨 실행 직후 400 에러 감지! 네트워크 리셋 시도.")
+        reset_network(d)
+        d(text="RETRY").click()
+        time.sleep(5)
+
+    d.screenshot(os.path.join(SCREENSHOT_DIR, "DEBUG_2_YOUTUBE_START.png"))
     
     nuke_popups(d)
     
-    print("   🕵️ 시크릿 모드 진입 시도 (우하단 -> 중앙)...")
+    print("   🕵️ 시크릿 모드 진입 (우하단 -> 중앙)...")
     
-    # 1. 우하단 'Library' 클릭
+    # 1. 우하단 'Library'
     d.click(0.9, 0.95) 
     time.sleep(3)
 
-    # ★ 요청 2: Library 들어간 직후 스크린샷
-    print("📸 [디버그] Library 진입 화면 저장")
-    d.screenshot(os.path.join(SCREENSHOT_DIR, "DEBUG_2_LIBRARY_ENTER.png"))
+    d.screenshot(os.path.join(SCREENSHOT_DIR, "DEBUG_3_LIBRARY_ENTER.png"))
     
     nuke_popups(d)
     
-    # 2. 중앙 버튼 찾기
+    # 2. 중앙 버튼
     if d(textContains="Sign in").exists:
         d(textContains="Sign in").click()
     elif d(description="Account").exists:
@@ -139,12 +161,9 @@ def setup_youtube(d):
         d.click(0.92, 0.05)
         
     time.sleep(2)
+    d.screenshot(os.path.join(SCREENSHOT_DIR, "DEBUG_4_MENU_OPEN.png"))
     
-    # ★ 요청 3: 시크릿 메뉴 찾기 전 스크린샷
-    print("📸 [디버그] 시크릿 메뉴 찾기 전 화면 저장")
-    d.screenshot(os.path.join(SCREENSHOT_DIR, "DEBUG_3_INCOGNITO_MENU.png"))
-    
-    # 3. 시크릿 모드 클릭
+    # 3. 시크릿 모드
     if d(textContains="Turn on Incognito").exists:
         d(textContains="Turn on Incognito").click()
         print("   ✅ 시크릿 모드 켜기 성공")
@@ -159,23 +178,24 @@ def setup_youtube(d):
 # [3단계] 검색
 # ==========================================
 def perform_search(d, keyword):
-    print(f"   🔍 '{keyword}' 검색 시도...")
+    print(f"   🔍 '{keyword}' 검색 준비...")
     
-    # 돋보기
     if d(description="Search").exists: d(description="Search").click()
     elif d(resourceId="com.google.android.youtube:id/menu_item_search").exists: d(resourceId="com.google.android.youtube:id/menu_item_search").click()
     else: d.click(0.85, 0.05)
     
     time.sleep(2)
     
-    # 키보드 팝업 즉시 제거
+    # 키보드 팝업 제거
     if d(textContains="better keyboard").exists:
+        print("   🔨 [검색전] 키보드 팝업 제거")
         d(textContains="No").click()
         time.sleep(1)
         if d(resourceId="com.google.android.youtube:id/search_edit_text").exists:
              d(resourceId="com.google.android.youtube:id/search_edit_text").click()
     
     # 입력 (set_text)
+    print(f"   ⌨️ '{keyword}' 입력 (set_text)...")
     search_box = d(resourceId="com.google.android.youtube:id/search_edit_text")
     if search_box.exists:
         search_box.set_text(keyword)
@@ -183,9 +203,11 @@ def perform_search(d, keyword):
         d.shell(f"input text '{keyword}'")
     
     time.sleep(1)
+    
+    # 엔터
     d.press("enter")
     time.sleep(1)
-    d.click(0.9, 0.9) # 엔터 보조
+    d.click(0.9, 0.9) 
     time.sleep(8)
 
 def run_android_monitoring():
@@ -196,7 +218,10 @@ def run_android_monitoring():
         os.system("adb wait-for-device")
         d = u2.connect(ADB_ADDR)
         
+        # 1. IP 확인 (20초 대기)
         check_ip_browser(d)
+        
+        # 2. 유튜브 준비
         setup_youtube(d)
 
         for keyword in KEYWORDS:
@@ -220,11 +245,12 @@ def run_android_monitoring():
                 
                 screen_text = read_screen_text(d, filename=f"{keyword}_{i}_top.png")
                 
-                # 오류 발견
+                # 오류 발견 시 네트워크 리셋
                 if "problem" in screen_text or "RETRY" in screen_text:
-                    print("🧹 400 에러 -> 복구 시도")
-                    nuke_popups(d)
-                    time.sleep(3)
+                    print("🧹 400 에러 지속 -> 네트워크 리셋 후 재시도")
+                    reset_network(d)
+                    nuke_popups(d) # RETRY 클릭
+                    time.sleep(5)
                     screen_text = read_screen_text(d, filename=f"{keyword}_{i}_retry.png")
 
                 d.swipe(500, 1500, 500, 500, 0.3) 
