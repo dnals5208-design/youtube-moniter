@@ -8,17 +8,12 @@ from datetime import datetime
 import sys
 import pytesseract
 from PIL import Image
-import re
 
 # ==========================================
-# [설정]
+# [설정] 키워드 제한 (요청사항)
 # ==========================================
 ADB_ADDR = "emulator-5554" 
-KEYWORDS = [
-    "해커스", "토익", "경찰공무원", 
-    "소방공무원", "공무원", "텝스", 
-    "토익스피킹", "공인중개사", "토스"
-]
+KEYWORDS = ["해커스"] # ★ 요청대로 해커스만 남김
 REPEAT_COUNT = 10 
 SCREENSHOT_DIR = "screenshots"
 
@@ -32,9 +27,9 @@ def classify_advertiser(text):
     # 1. 타사 광고 식별
     if "해커스" not in clean_text and "Hackers" not in clean_text:
         # 타사인데 공무원/자격증 관련 키워드가 보이면 경쟁사로 분류
-        if any(x in clean_text for x in ["에듀윌", "공단기", "메가", "박문각", "YBM", "파고다", "영단기"]):
-            return "경쟁사", text[:20] # 상세 내용 조금만
-        return "타사", text[:20]
+        if any(x in clean_text for x in ["에듀윌", "공단기", "메가", "박문각", "YBM", "파고다", "영단기", "시원스쿨", "야나두"]):
+            return "경쟁사", text[:30] # 상세 내용
+        return "타사", text[:30]
 
     # 2. 해커스 내부 분류
     if "공무원" in clean_text: return "해커스공무원", "해커스"
@@ -50,7 +45,7 @@ def classify_advertiser(text):
     return "해커스(기타)", "해커스"
 
 # ==========================================
-# [기능] 구글 시트 (초기화 기능 추가)
+# [기능] 구글 시트 (초기화 기능 포함)
 # ==========================================
 def get_worksheet():
     try:
@@ -84,7 +79,6 @@ def get_worksheet():
 def append_to_sheet(worksheet, data):
     if worksheet:
         try:
-            # 순서: 시간, 키워드, 회차, 광고여부, 광고주_구분, 상세_광고주, 광고형태, 제목
             row = [
                 data["시간"], 
                 data["키워드"], 
@@ -111,40 +105,48 @@ def read_screen_text(d, filename=None):
     except: return ""
 
 def nuke_popups(d):
-    """모든 방해 요소 제거"""
+    """방해꾼 제거 (이미지 1, 4 등 대응)"""
     try:
-        # 각종 동의 팝업
-        if d(textContains="Accept").exists: d(textContains="Accept").click()
-        if d(textContains="No thanks").exists: d(textContains="No thanks").click()
-        if d(textContains="Allow").exists: d(textContains="Allow").click()
+        # 크롬/구글 로그인 (이미지 1)
+        if d(textContains="Welcome").exists:
+             if d(textContains="Accept").exists: d(textContains="Accept").click()
+        if d(textContains="Turn on sync").exists:
+             if d(textContains="No thanks").exists: d(textContains="No thanks").click()
+        if d(textContains="Add account").exists: # 이미지 5b841c 대응
+             if d(textContains="Use without").exists: d(textContains="Use without").click()
+
+        # 유튜브 팝업
+        if d(textContains="Try searching").exists: # 검색 유도 팝업
+             d.click(0.5, 0.2) # 배경 클릭해서 닫기
         
-        # 키보드 설정 팝업
+        # 키보드 설정
         if d(textContains="better keyboard").exists:
             d(textContains="No").click()
             
-        # 유튜브 프리미엄/업데이트
-        if d(textContains="Skip trial").exists: d(textContains="Skip trial").click()
-        if d(textContains="Later").exists: d(textContains="Later").click()
-        if d(textContains="Got it").exists: d(textContains="Got it").click()
+        # 자막/업데이트 등 (이미지 4)
+        if d(textContains="Captions").exists:
+            d.click(0.5, 0.2) # 화면 상단 빈곳 클릭
     except: pass
 
 # ==========================================
-# [1단계] IP 확인 (심플하게)
+# [1단계] IP 확인 (크롬 설정 스킵 강화)
 # ==========================================
 def check_ip_browser(d):
-    print("🌐 IP 확인 중...")
+    print("🌐 IP 확인 시작...")
     d.shell("am force-stop com.android.chrome")
     d.app_start("com.android.chrome", stop=True)
     time.sleep(5)
-    nuke_popups(d)
+    
+    nuke_popups(d) # Welcome 화면 처리
     
     d.shell('am start -a android.intent.action.VIEW -d "https://ipinfo.io/json" -p com.android.chrome')
     time.sleep(15)
+    
     nuke_popups(d)
     read_screen_text(d, filename="DEBUG_1_IP.png")
 
 # ==========================================
-# [2단계] 유튜브 준비
+# [2단계] 유튜브 준비 (시크릿 모드 재시도 로직)
 # ==========================================
 def setup_youtube(d):
     print("   🧹 유튜브 초기화...")
@@ -154,27 +156,38 @@ def setup_youtube(d):
     time.sleep(15)
     nuke_popups(d)
     
-    # 400 에러 떠도 무시하고 진행 (검색이 중요)
+    # 400 에러 체크 (스샷만)
+    d.screenshot(os.path.join(SCREENSHOT_DIR, "DEBUG_2_YOUTUBE.png"))
+
+    print("   🕵️ 시크릿 모드 진입 시도...")
     
-    print("   🕵️ 시크릿 모드 진입...")
-    # 최신 유튜브 UI 대응: 우하단 -> 시크릿
-    d.click(0.9, 0.95) # 우하단 클릭
-    time.sleep(3)
-    
-    # 로그인 버튼 찾기
-    if d(textContains="Sign in").exists: d(textContains="Sign in").click()
-    elif d(description="Account").exists: d(description="Account").click()
-    else: d.click(0.92, 0.05) # 우상단
-        
+    # 우상단 프로필 아이콘 클릭 (가장 확실)
+    d.click(0.92, 0.05)
     time.sleep(2)
+    
+    # 메뉴가 떴는지 확인
     if d(textContains="Turn on Incognito").exists:
         d(textContains="Turn on Incognito").click()
-    
+        print("   ✅ 시크릿 모드 켜기 성공")
+    elif d(resourceId="com.google.android.youtube:id/new_incognito_session_item").exists:
+        d(resourceId="com.google.android.youtube:id/new_incognito_session_item").click()
+        print("   ✅ 시크릿 모드 켜기 성공 (ID)")
+    else:
+        # 로그인 버튼이 떠서 메뉴가 안 보일 경우 (이미지 5b8494)
+        if d(textContains="Sign in").exists and d(textContains="Settings").exists:
+             print("   ⚠️ 로그인 유도 화면 -> 닫기 시도")
+             d.press("back") # 뒤로가기 후 다시 시도
+             time.sleep(1)
+             d.click(0.92, 0.05) # 다시 프로필 클릭
+             time.sleep(1)
+             if d(textContains="Turn on Incognito").exists:
+                d(textContains="Turn on Incognito").click()
+
     time.sleep(5)
     if d(text="Got it").exists: d(text="Got it").click()
 
 # ==========================================
-# [3단계] 검색 및 분석 (핵심)
+# [3단계] 검색 및 분석 (입력 보장 + 랜덤클릭 삭제)
 # ==========================================
 def perform_search_and_analyze(d, keyword, worksheet, count):
     print(f"\n🔎 [{count}] '{keyword}' 검색 시작...")
@@ -187,16 +200,35 @@ def perform_search_and_analyze(d, keyword, worksheet, count):
     time.sleep(2)
     nuke_popups(d) # 키보드 팝업 제거
     
-    # 2. 검색어 입력 (ADB Input)
-    # set_text 대신 adb input 사용 (더 확실함)
-    d.shell(f"input text '{keyword}'")
-    time.sleep(2)
+    # 2. ★ [핵심] 텍스트 입력 확인 사살
+    # 텍스트가 실제로 들어갔는지 확인하고 안 들어갔으면 재시도
+    print(f"   ⌨️ '{keyword}' 입력 시도...")
     
-    # 3. 엔터 입력 (좌표 클릭 삭제함 - 오작동 원인)
+    # 방법 A: set_text (가장 빠름)
+    search_box = d(resourceId="com.google.android.youtube:id/search_edit_text")
+    if search_box.exists:
+        search_box.set_text(keyword)
+    else:
+        d.shell(f"input text '{keyword}'")
+        
+    time.sleep(1)
+    
+    # 입력 확인
+    current_text = ""
+    if search_box.exists:
+        current_text = search_box.get_text()
+    
+    # 비어있으면 ADB로 재입력
+    if not current_text or current_text == "Search YouTube":
+        print("   ⚠️ 입력 실패 감지 -> ADB로 재입력")
+        d.shell(f"input text '{keyword}'")
+        time.sleep(1)
+
+    # 3. ★ [핵심] 엔터 입력 (좌표 클릭 삭제함!)
     print("   🚀 검색 실행 (ENTER)...")
-    d.shell("input keyevent 66") # Enter Key
-    time.sleep(2)
-    d.press("search") # 한번 더 보장
+    d.press("enter")
+    time.sleep(1)
+    d.shell("input keyevent 66") # 한번 더 확실하게
     
     time.sleep(8) # 로딩 대기
     
@@ -206,10 +238,10 @@ def perform_search_and_analyze(d, keyword, worksheet, count):
     
     # 데이터 추출
     is_ad = "X"
-    ad_corp = "-"     # 광고주 구분 (해커스공무원 등)
-    ad_detail = "-"   # 상세 광고주
-    ad_type = "-"     # 배너 vs 영상
-    ad_title = "-"    # 제목
+    ad_corp = "-"     
+    ad_detail = "-"   
+    ad_type = "-"     
+    ad_title = "-"    
     
     # 광고 키워드 찾기
     if "Ad" in screen_text or "광고" in screen_text or "Sponsored" in screen_text:
@@ -221,17 +253,14 @@ def perform_search_and_analyze(d, keyword, worksheet, count):
         else:
             ad_type = "배너/검색광고"
             
-        # 광고주 및 제목 분석 (선생님 로직 적용)
-        # OCR 텍스트에서 의미 있는 줄만 추출
+        # 제목 추정 (OCR 텍스트 중 상위 라인)
         lines = [line for line in screen_text.split('\n') if len(line) > 5]
-        
-        # 제목 추정 (보통 상단에 위치)
         for line in lines:
             if "광고" not in line and "Ad" not in line:
                 ad_title = line
                 break
         
-        # 광고주 분류
+        # ★ 선생님의 분류 로직 적용
         ad_corp, ad_detail = classify_advertiser(screen_text)
         
         print(f"   🚨 광고 발견! [{ad_corp}] {ad_title[:15]}...")
@@ -251,7 +280,7 @@ def perform_search_and_analyze(d, keyword, worksheet, count):
     }
     append_to_sheet(worksheet, data)
     
-    # 6. 복귀
+    # 6. 복귀 (검색어 지우기 위해 X 버튼 누르거나 뒤로가기)
     d.press("back")
     time.sleep(1)
     d.press("back") # 목록 -> 홈
@@ -259,7 +288,7 @@ def perform_search_and_analyze(d, keyword, worksheet, count):
 
 def run_android_monitoring():
     ws = get_worksheet()
-    print(f"📱 [MO] 모니터링 시작...")
+    print(f"📱 [MO] 모니터링 시작 (해커스 전용)...")
 
     try:
         os.system("adb wait-for-device")
