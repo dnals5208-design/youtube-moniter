@@ -68,47 +68,52 @@ def read_screen_text(d, filename=None):
     except: return ""
 
 # ==========================================
-# [기능] 팝업/오류 처리기 (청소부)
+# [기능] 팝업/오류 처리기 (청소부) - 기능 강화됨
 # ==========================================
 def handle_popups(d):
-    """각종 방해꾼(로그인/오류/설정/약관) 처리"""
+    """각종 방해꾼(키보드/로그인/오류/설정/약관) 처리"""
     try:
-        screen_text = read_screen_text(d)
+        # OCR 없이 빠르게 체크 가능한 UI 요소들 먼저 처리
         
-        # 1. 서버 오류 (Problem with server [400]) -> 시간 동기화 문제일 때 뜸
-        if "problem" in screen_text or "400" in screen_text or "RETRY" in screen_text:
-            print("   ⚠️ [오류] 서버 접속 에러(400) 감지. RETRY 클릭!")
-            if d(text="RETRY").exists: d(text="RETRY").click()
-            else: d.click(0.5, 0.5) # 화면 중앙 클릭
-            time.sleep(3)
-            
-        # 2. 엉뚱한 '설정(Settings)' 화면
-        if "Settings" in screen_text and "General" in screen_text:
-            print("   ⚠️ [길잃음] 설정 화면 감지. 뒤로가기.")
-            d.press("back")
-            time.sleep(2)
+        # 1. ★ [NEW] Gboard(키보드) 설정 팝업 제거 (이미지 2번 해결)
+        if d(text="Help build a better keyboard").exists:
+            print("   🔨 [방해꾼] 키보드 설정 팝업 제거 (No, thanks)")
+            if d(text="No, thanks").exists: d(text="No, thanks").click()
+            elif d(text="No thanks").exists: d(text="No thanks").click()
+            time.sleep(1)
 
-        # 3. 로그인/약관/프리미엄 권유
+        # 2. ★ [NEW] 크롬 로그인 팝업 제거 (이미지 1번 해결)
+        if d(text="Sign in to Chrome").exists:
+            print("   🔨 [방해꾼] 크롬 로그인 거절")
+            if d(text="No thanks").exists: d(text="No thanks").click()
+            elif d(text="No, thanks").exists: d(text="No, thanks").click()
+            time.sleep(1)
+
+        # 3. 유튜브/구글 일반 팝업
         if d(text="Accept & continue").exists: 
             d(text="Accept & continue").click()
-            print("   🔨 약관 동의 처리")
-        if d(text="No thanks").exists: 
-            d(text="No thanks").click()
+        if d(text="Use without an account").exists:
+            d(text="Use without an account").click()
         if d(text="Skip trial").exists: 
             d(text="Skip trial").click()
         if d(text="나중에").exists: 
             d(text="나중에").click()
-        if d(text="Use without an account").exists:
-            d(text="Use without an account").click()
+        if d(text="RETRY").exists:
+            print("   ⚠️ [오류] 400 에러 재시도")
+            d(text="RETRY").click()
+            time.sleep(3)
+            
     except: pass
 
 # ==========================================
-# [기능] 안전한 텍스트 입력 (튕김 방지)
+# [기능] 안전한 텍스트 입력
 # ==========================================
 def safe_type_text(d, text):
-    """키보드 앱 충돌 방지를 위해 ADB Shell로 직접 입력"""
     try:
         d.shell(f"input text '{text}'")
+        time.sleep(1)
+        # 입력 후 혹시 키보드 팝업이 떴으면 닫기 위해 뒤로가기 한번 시도 (안전장치)
+        # 하지만 Gboard 팝업은 handle_popups가 처리함
     except Exception as e:
         print(f"   ⚠️ 입력 중 에러: {e}")
 
@@ -121,24 +126,22 @@ def check_ip_browser(d):
     d.app_start("com.android.chrome", stop=True)
     time.sleep(6)
     
-    handle_popups(d)
+    handle_popups(d) # 로그인 창 끄기
     
-    # IP 사이트 접속
     d.shell('am start -a android.intent.action.VIEW -d "https://ipinfo.io/json" -p com.android.chrome')
     time.sleep(8)
     
-    handle_popups(d)
+    handle_popups(d) # 로그인 창 또 뜨면 끄기
     
     print("📸 IP 확인 화면 캡처 중...")
     read_screen_text(d, filename="DEBUG_IP_CHECK.png")
 
 # ==========================================
-# [기능] 유튜브 실행 및 시크릿 모드
+# [기능] 유튜브 실행
 # ==========================================
 def setup_youtube(d):
     print("   🔨 유튜브 실행 및 시크릿 모드 진입...")
     d.shell("am force-stop com.google.android.youtube")
-    # 메인 액티비티 강제 실행
     d.shell("am start -n com.google.android.youtube/com.google.android.apps.youtube.app.WatchWhileActivity")
     time.sleep(10)
     
@@ -146,16 +149,14 @@ def setup_youtube(d):
     
     print("   🕵️ 시크릿 모드 진입 시도...")
     
-    # 1. 프로필 아이콘 클릭
     if d(description="Account").exists: d(description="Account").click()
     elif d(resourceId="com.google.android.youtube:id/mobile_user_account_image").exists:
         d(resourceId="com.google.android.youtube:id/mobile_user_account_image").click()
-    else: d.click(0.92, 0.05) # 우상단 좌표
+    else: d.click(0.92, 0.05)
     
     time.sleep(2)
     handle_popups(d)
 
-    # 2. 메뉴 클릭
     if d(resourceId="com.google.android.youtube:id/new_incognito_session_item").exists:
         d(resourceId="com.google.android.youtube:id/new_incognito_session_item").click()
         print("   ✅ 시크릿 모드 클릭")
@@ -164,8 +165,6 @@ def setup_youtube(d):
         print("   ✅ Turn on Incognito 클릭")
     elif d(text="시크릿 모드 사용").exists:
         d(text="시크릿 모드 사용").click()
-    else:
-        print("   ⚠️ 시크릿 버튼 못 찾음 (이미 진입했거나 UI 다름)")
 
     time.sleep(5)
     if d(text="Got it").exists: d(text="Got it").click()
@@ -182,10 +181,7 @@ def run_android_monitoring():
         os.system("adb wait-for-device")
         d = u2.connect(ADB_ADDR)
         
-        # 1. IP 확인
         check_ip_browser(d)
-        
-        # 2. 유튜브 준비
         setup_youtube(d)
 
         for keyword in KEYWORDS:
@@ -211,23 +207,25 @@ def run_android_monitoring():
                 elif d(description="Search").exists:
                     d(description="Search").click()
                 else:
-                    print("❌ 검색 버튼 없음 -> 좌표 클릭 시도")
                     d.click(0.85, 0.05)
                 
                 time.sleep(2)
                 
-                # 안전한 입력
+                # 입력 및 키보드 팝업 처리
                 safe_type_text(d, keyword)
                 time.sleep(1)
+                handle_popups(d) # ★ 여기서 키보드 팝업 제거 시도
                 d.press("enter")
                 time.sleep(8)
                 
-                # 화면 인식
+                # 화면 인식 전 한번 더 팝업 체크
+                handle_popups(d)
+                
                 screen_text = read_screen_text(d, filename=f"{keyword}_{i}_top.png")
                 
-                # 오류/팝업 발견 시 처리
-                if any(x in screen_text for x in ["problem", "RETRY", "Sign in", "Google", "400"]):
-                    print("🧹 [복구] 오류/팝업 발견. 처리 후 스크린샷 재촬영.")
+                # 오류 발견 시 처리
+                if any(x in screen_text for x in ["problem", "RETRY", "400", "keyboard"]):
+                    print("🧹 [복구] 팝업/오류 발견. 재촬영.")
                     handle_popups(d)
                     time.sleep(3)
                     screen_text = read_screen_text(d, filename=f"{keyword}_{i}_retry.png")
@@ -235,7 +233,6 @@ def run_android_monitoring():
                 d.swipe(500, 1500, 500, 500, 0.3) 
                 time.sleep(2)
                 
-                # 광고 판별
                 is_ad = "X"
                 ad_text = "-"
                 if any(x in screen_text for x in ["광고", "Ad", "Sponsored"]):
@@ -246,7 +243,6 @@ def run_android_monitoring():
                 else:
                     print(f"❌ 없음 (인식: {screen_text[:15]}...)")
                 
-                # 시트 저장
                 result_data = {
                     "날짜": datetime.now().strftime('%Y-%m-%d'),
                     "시간": datetime.now().strftime('%H:%M:%S'),
