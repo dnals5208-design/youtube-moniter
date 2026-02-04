@@ -45,15 +45,12 @@ jobs:
 
     - name: 🛡️ [진단] 네트워크 속도 및 IP 확인
       run: |
-        # 1. IP 확인
         HTTP_IP=$(curl -s -x http://127.0.0.1:8118 https://ipinfo.io/json)
         echo "   👉 Privoxy IP 정보: $HTTP_IP"
-        
-        # 2. 한국 IP 검증
         if [[ "$HTTP_IP" == *"KR"* ]] || [[ "$HTTP_IP" == *"Korea"* ]]; then
           echo "✅ [성공] 한국 IP 확인됨!"
         else
-          echo "❌ [실패] 한국 IP가 아닙니다. 터널링을 점검하세요."
+          echo "❌ [실패] 한국 IP가 아닙니다."
           exit 1
         fi
 
@@ -66,24 +63,23 @@ jobs:
     - name: Run Android Emulator (API 33 - Android 13)
       uses: reactivecircus/android-emulator-runner@v2
       with:
-        # ★ [핵심] 최신 안드로이드 13으로 변경 (유튜브 최신 버전 탑재)
         api-level: 33
         target: google_apis
         arch: x86_64
-        profile: Pixel 4
-        ram-size: 4096M # 최신 OS라 램을 늘림
+        # ★ [수정] Pixel 4 -> Nexus 6 (호환성 확보)
+        profile: Nexus 6
+        ram-size: 4096M
         heap-size: 1024M
         # 서울 시간대 + DNS 고정 + 한국어
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-load -http-proxy http://127.0.0.1:8118 -timezone Asia/Seoul -dns-server 8.8.8.8
         
         script: |
-          echo "🚀 Android 13 (API 33) Booted."
+          echo "🚀 Android 13 (Nexus 6) Booted."
           
           echo "⏰ [필수] 시간 강제 동기화..."
           adb shell settings put global auto_time 0
           adb shell settings put global time_zone Asia/Seoul
           
-          # 호스트 시간 주입 (초 단위)
           HOST_TIME=$(date +%m%d%H%M.%S)
           adb shell date $HOST_TIME
           
