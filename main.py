@@ -58,49 +58,35 @@ def read_screen_text(d, filename=None):
 def nuke_popups(d):
     """방해꾼 제거"""
     try:
-        # 1. 크롬/구글 로그인
         if d(textContains="Accept").exists: d(textContains="Accept").click()
         if d(textContains="No thanks").exists: d(textContains="No thanks").click()
         if d(textContains="No Thanks").exists: d(textContains="No Thanks").click()
         
-        # 2. 키보드 팝업
         if d(textContains="better keyboard").exists:
             d(textContains="No").click()
         
-        # 3. 400 에러 (보이면 RETRY)
         if d(text="RETRY").exists:
             print("   ⚠️ [오류] 400 에러 발견 -> RETRY 클릭")
             d(text="RETRY").click()
             time.sleep(2)
 
-        # 4. 기타
         if d(text="Skip trial").exists: d(text="Skip trial").click()
         if d(text="나중에").exists: d(text="나중에").click()
         if d(text="Got it").exists: d(text="Got it").click()
     except: pass
 
-# ==========================================
-# [기능] 네트워크 심폐소생술 (비행기 모드)
-# ==========================================
 def reset_network(d):
-    print("   ✈️ 네트워크 초기화 (비행기 모드 ON/OFF)...")
-    # 비행기 모드 ON
+    print("   ✈️ 400 에러 해결을 위한 네트워크 리셋...")
     d.shell("settings put global airplane_mode_on 1")
     d.shell("am broadcast -a android.intent.action.AIRPLANE_MODE --ez state true")
     time.sleep(3)
-    # 비행기 모드 OFF
     d.shell("settings put global airplane_mode_on 0")
     d.shell("am broadcast -a android.intent.action.AIRPLANE_MODE --ez state false")
     time.sleep(5)
     print("   ✅ 네트워크 재연결 완료")
 
-# ==========================================
-# [1단계] IP 확인 (선 청소 -> 후 접속)
-# ==========================================
 def check_ip_browser(d):
     print("🌐 IP 확인 시작...")
-    
-    # 브라우저 켜기 전에도 네트워크 한번 리셋
     reset_network(d)
     
     d.shell("am force-stop com.android.chrome")
@@ -117,11 +103,8 @@ def check_ip_browser(d):
     print("📸 IP 확인 화면 캡처")
     read_screen_text(d, filename="DEBUG_1_IP_CHECK.png")
 
-# ==========================================
-# [2단계] 유튜브 준비
-# ==========================================
 def setup_youtube(d):
-    print("   🧹 유튜브 앱 데이터 완전 초기화...")
+    print("   🧹 유튜브 앱 데이터 초기화...")
     d.shell("pm clear com.google.android.youtube") 
     time.sleep(2)
     
@@ -129,10 +112,9 @@ def setup_youtube(d):
     d.shell("am start -n com.google.android.youtube/com.google.android.apps.youtube.app.WatchWhileActivity")
     time.sleep(10)
     
-    # 실행 직후 400 에러 뜨면 네트워크 리셋 시도
     screen_text = read_screen_text(d)
     if "400" in screen_text or "problem" in screen_text:
-        print("   🚨 실행 직후 400 에러 감지! 네트워크 리셋 시도.")
+        print("   🚨 실행 직후 400 에러! 네트워크 리셋.")
         reset_network(d)
         d(text="RETRY").click()
         time.sleep(5)
@@ -142,16 +124,12 @@ def setup_youtube(d):
     nuke_popups(d)
     
     print("   🕵️ 시크릿 모드 진입 (우하단 -> 중앙)...")
-    
-    # 1. 우하단 'Library'
     d.click(0.9, 0.95) 
     time.sleep(3)
 
     d.screenshot(os.path.join(SCREENSHOT_DIR, "DEBUG_3_LIBRARY_ENTER.png"))
-    
     nuke_popups(d)
     
-    # 2. 중앙 버튼
     if d(textContains="Sign in").exists:
         d(textContains="Sign in").click()
     elif d(description="Account").exists:
@@ -163,7 +141,6 @@ def setup_youtube(d):
     time.sleep(2)
     d.screenshot(os.path.join(SCREENSHOT_DIR, "DEBUG_4_MENU_OPEN.png"))
     
-    # 3. 시크릿 모드
     if d(textContains="Turn on Incognito").exists:
         d(textContains="Turn on Incognito").click()
         print("   ✅ 시크릿 모드 켜기 성공")
@@ -174,9 +151,6 @@ def setup_youtube(d):
     time.sleep(5)
     if d(text="Got it").exists: d(text="Got it").click()
 
-# ==========================================
-# [3단계] 검색
-# ==========================================
 def perform_search(d, keyword):
     print(f"   🔍 '{keyword}' 검색 준비...")
     
@@ -186,7 +160,6 @@ def perform_search(d, keyword):
     
     time.sleep(2)
     
-    # 키보드 팝업 제거
     if d(textContains="better keyboard").exists:
         print("   🔨 [검색전] 키보드 팝업 제거")
         d(textContains="No").click()
@@ -194,7 +167,6 @@ def perform_search(d, keyword):
         if d(resourceId="com.google.android.youtube:id/search_edit_text").exists:
              d(resourceId="com.google.android.youtube:id/search_edit_text").click()
     
-    # 입력 (set_text)
     print(f"   ⌨️ '{keyword}' 입력 (set_text)...")
     search_box = d(resourceId="com.google.android.youtube:id/search_edit_text")
     if search_box.exists:
@@ -203,8 +175,6 @@ def perform_search(d, keyword):
         d.shell(f"input text '{keyword}'")
     
     time.sleep(1)
-    
-    # 엔터
     d.press("enter")
     time.sleep(1)
     d.click(0.9, 0.9) 
@@ -218,10 +188,7 @@ def run_android_monitoring():
         os.system("adb wait-for-device")
         d = u2.connect(ADB_ADDR)
         
-        # 1. IP 확인 (20초 대기)
         check_ip_browser(d)
-        
-        # 2. 유튜브 준비
         setup_youtube(d)
 
         for keyword in KEYWORDS:
@@ -231,25 +198,20 @@ def run_android_monitoring():
                 sys.stdout.flush()
                 print(f"   [{i}/{REPEAT_COUNT}] 진행 중...", end=" ")
                 
-                # 앱 이탈시 복귀
                 if d.app_current()['package'] != "com.google.android.youtube":
                     d.shell("am start -n com.google.android.youtube/com.google.android.apps.youtube.app.WatchWhileActivity")
                     time.sleep(5)
                 
-                # 400 에러 체크
                 nuke_popups(d) 
-
                 perform_search(d, keyword)
-                
                 nuke_popups(d)
                 
                 screen_text = read_screen_text(d, filename=f"{keyword}_{i}_top.png")
                 
-                # 오류 발견 시 네트워크 리셋
                 if "problem" in screen_text or "RETRY" in screen_text:
                     print("🧹 400 에러 지속 -> 네트워크 리셋 후 재시도")
                     reset_network(d)
-                    nuke_popups(d) # RETRY 클릭
+                    nuke_popups(d)
                     time.sleep(5)
                     screen_text = read_screen_text(d, filename=f"{keyword}_{i}_retry.png")
 
@@ -275,7 +237,6 @@ def run_android_monitoring():
                     "비고": f"{ad_text}"
                 }
                 append_to_sheet(ws, result_data)
-                
                 d.press("back")
                 time.sleep(2)
                 
