@@ -56,25 +56,34 @@ def read_screen_text(d, filename=None):
     except: return ""
 
 def nuke_popups(d):
-    """방해꾼 제거"""
+    """최신 버전용 팝업 제거기"""
     try:
+        # 안드로이드 13 알림 허용 팝업
+        if d(textContains="Allow").exists: d(textContains="Allow").click()
+        if d(textContains="Don't allow").exists: d(textContains="Don't allow").click()
+        
+        # 크롬/구글 로그인
         if d(textContains="Accept").exists: d(textContains="Accept").click()
         if d(textContains="No thanks").exists: d(textContains="No thanks").click()
-        if d(textContains="No Thanks").exists: d(textContains="No Thanks").click()
         
+        # 유튜브 업데이트 권유 (나중에)
+        if d(textContains="Update").exists and d(textContains="Later").exists:
+            print("   🔨 업데이트 팝업 -> 나중에 클릭")
+            d(textContains="Later").click()
+
         # 키보드 팝업
         if d(textContains="better keyboard").exists:
             d(textContains="No").click()
         
-        # 400 에러 (RETRY) -> 여기선 무시 (검색으로 뚫을 거임)
+        # 400 에러 (RETRY) -> 무시하고 진행
         
+        # 프리미엄
         if d(text="Skip trial").exists: d(text="Skip trial").click()
         if d(text="나중에").exists: d(text="나중에").click()
-        if d(text="Got it").exists: d(text="Got it").click()
     except: pass
 
 # ==========================================
-# [1단계] IP 확인
+# [1단계] IP 확인 (대기 20초)
 # ==========================================
 def check_ip_browser(d):
     print("🌐 IP 확인 시작...")
@@ -85,50 +94,58 @@ def check_ip_browser(d):
     nuke_popups(d)
     d.shell('am start -a android.intent.action.VIEW -d "https://ipinfo.io/json" -p com.android.chrome')
     
-    print("   ⏳ 로딩 대기 (15초)...") 
-    time.sleep(15)
+    print("   ⏳ 로딩 대기 (20초)...") 
+    time.sleep(20)
     
     nuke_popups(d)
     print("📸 IP 확인 화면 캡처")
     read_screen_text(d, filename="DEBUG_1_IP_CHECK.png")
 
 # ==========================================
-# [2단계] 유튜브 준비 (400 에러면 시크릿 포기)
+# [2단계] 유튜브 준비 (최신 OS 대응)
 # ==========================================
 def setup_youtube(d):
-    print("   🧹 유튜브 앱 데이터 초기화...")
+    print("   🧹 유튜브 캐시 삭제 (최신 버전)...")
     d.shell("pm clear com.google.android.youtube") 
-    time.sleep(2)
+    time.sleep(3)
     
     print("   🔨 유튜브 실행...")
     d.shell("am start -n com.google.android.youtube/com.google.android.apps.youtube.app.WatchWhileActivity")
-    time.sleep(10)
+    # 최신 폰은 켜지는데 시간이 좀 더 걸릴 수 있음
+    time.sleep(15)
     
-    nuke_popups(d)
+    nuke_popups(d) # 알림 허용 팝업 등 처리
     
-    # 400 에러 확인
+    # 400 에러 체크
     screen_text = read_screen_text(d)
     if "400" in screen_text or "problem" in screen_text:
-        print("   🚨 400 에러 감지! 로그인/시크릿 모드 생략하고 바로 검색합니다.")
-        # 여기서 함수 종료 -> 바로 검색 루프로 넘어감
-        return 
+        print("   🚨 400 에러 감지 (무시하고 검색 시도)")
 
-    print("   🕵️ 시크릿 모드 진입 시도...")
-    d.click(0.9, 0.95) # Library
+    d.screenshot(os.path.join(SCREENSHOT_DIR, "DEBUG_2_YOUTUBE_START.png"))
+    
+    print("   🕵️ 시크릿 모드 진입 시도 (우하단 -> 중앙)...")
+    
+    # 최신 버전은 'Library' 대신 'You' 또는 프로필 아이콘이 우하단에 있을 수 있음
+    # 우하단 좌표 클릭이 가장 안전
+    d.click(0.9, 0.95) 
     time.sleep(3)
+
+    d.screenshot(os.path.join(SCREENSHOT_DIR, "DEBUG_3_PROFILE_TAB.png"))
     nuke_popups(d)
     
+    # 로그인 버튼이나 프로필 관련 텍스트 찾기
     if d(textContains="Sign in").exists:
         d(textContains="Sign in").click()
     elif d(description="Account").exists:
         d(description="Account").click()
     else:
-        # 400 에러도 아닌데 버튼이 없으면 그냥 진행
-        print("   ⚠️ 로그인 버튼 없음, 검색으로 이동")
-        return
-
+        # 못 찾으면 우상단 (구버전 UI일 수도 있으니)
+        d.click(0.92, 0.05)
+        
     time.sleep(2)
+    d.screenshot(os.path.join(SCREENSHOT_DIR, "DEBUG_4_MENU_OPEN.png"))
     
+    # 시크릿 모드
     if d(textContains="Turn on Incognito").exists:
         d(textContains="Turn on Incognito").click()
         print("   ✅ 시크릿 모드 켜기 성공")
@@ -140,35 +157,25 @@ def setup_youtube(d):
     if d(text="Got it").exists: d(text="Got it").click()
 
 # ==========================================
-# [3단계] 검색 (400 에러 뚫기)
+# [3단계] 검색 (입력 보장)
 # ==========================================
 def perform_search(d, keyword):
-    print(f"   🔍 '{keyword}' 검색 시도...")
+    print(f"   🔍 '{keyword}' 검색 준비...")
     
-    # ★ 400 에러 화면에서도 '돋보기' 아이콘은 보통 살아있음 (ID로 찾기)
-    if d(resourceId="com.google.android.youtube:id/menu_item_search").exists: 
-        print("   ✅ 돋보기 아이콘(ID) 발견 -> 클릭")
-        d(resourceId="com.google.android.youtube:id/menu_item_search").click()
-    elif d(description="Search").exists: 
-        print("   ✅ 돋보기 아이콘(Desc) 발견 -> 클릭")
-        d(description="Search").click()
-    else: 
-        print("   ⚠️ 돋보기 안 보임 -> 좌표 강제 클릭 (우상단)")
-        d.click(0.85, 0.05)
+    if d(description="Search").exists: d(description="Search").click()
+    elif d(resourceId="com.google.android.youtube:id/menu_item_search").exists: d(resourceId="com.google.android.youtube:id/menu_item_search").click()
+    else: d.click(0.85, 0.05)
     
     time.sleep(2)
     
-    # 키보드 팝업 제거
     if d(textContains="better keyboard").exists:
         print("   🔨 [검색전] 키보드 팝업 제거")
         d(textContains="No").click()
         time.sleep(1)
-        # 팝업 닫고 다시 검색창 누르기
         if d(resourceId="com.google.android.youtube:id/search_edit_text").exists:
              d(resourceId="com.google.android.youtube:id/search_edit_text").click()
     
-    # 입력 (set_text)
-    print(f"   ⌨️ '{keyword}' 입력...")
+    print(f"   ⌨️ '{keyword}' 입력 (set_text)...")
     search_box = d(resourceId="com.google.android.youtube:id/search_edit_text")
     if search_box.exists:
         search_box.set_text(keyword)
@@ -178,8 +185,6 @@ def perform_search(d, keyword):
     time.sleep(1)
     d.press("enter")
     time.sleep(1)
-    
-    # 엔터 보조 클릭 (파란 버튼)
     d.click(0.9, 0.9) 
     time.sleep(8)
 
@@ -191,10 +196,7 @@ def run_android_monitoring():
         os.system("adb wait-for-device")
         d = u2.connect(ADB_ADDR)
         
-        # 1. IP 확인 (대기 15초)
         check_ip_browser(d)
-        
-        # 2. 유튜브 준비 (400 에러 뜨면 바로 패스)
         setup_youtube(d)
 
         for keyword in KEYWORDS:
@@ -209,17 +211,15 @@ def run_android_monitoring():
                     time.sleep(5)
                 
                 nuke_popups(d) 
-
                 perform_search(d, keyword)
-                
                 nuke_popups(d)
                 
                 screen_text = read_screen_text(d, filename=f"{keyword}_{i}_top.png")
                 
-                # 결과 읽었는데도 400 에러가 뜬다? -> 그건 진짜 검색 실패
+                # 400 에러면 RETRY 누르고 스샷만 찍고 넘김 (검색 결과가 나올 수도 있으니)
                 if "problem" in screen_text or "RETRY" in screen_text:
-                    print("🧹 검색 결과도 400 에러... RETRY 한번 클릭")
-                    d(text="RETRY").click()
+                    print("🧹 400 에러 감지 (RETRY 시도)")
+                    nuke_popups(d)
                     time.sleep(3)
                     screen_text = read_screen_text(d, filename=f"{keyword}_{i}_retry.png")
 
@@ -245,7 +245,6 @@ def run_android_monitoring():
                     "비고": f"{ad_text}"
                 }
                 append_to_sheet(ws, result_data)
-                
                 d.press("back")
                 time.sleep(2)
                 
