@@ -13,7 +13,7 @@ from PIL import Image
 # [설정]
 # ==========================================
 ADB_ADDR = "emulator-5554" 
-KEYWORDS = ["해커스"] # 테스트용 단일 키워드
+KEYWORDS = ["해커스"] # 일단 해커스만 테스트
 REPEAT_COUNT = 10 
 SCREENSHOT_DIR = "screenshots"
 
@@ -100,7 +100,8 @@ def nuke_popups(d):
         if d(textContains="No thanks").exists: d(textContains="No thanks").click()
         if d(textContains="better keyboard").exists: d(textContains="No").click()
         if d(text="Skip trial").exists: d(text="Skip trial").click()
-        if d(textContains="Pause").exists and d(textContains="history").exists: # 일시중지 확인 팝업
+        # 기록 일시 중지 확인 팝업
+        if d(textContains="Pause").exists and d(textContains="history").exists:
              d(text="Pause").click()
     except: pass
 
@@ -122,14 +123,16 @@ def check_ip_browser(d):
 # [2단계] 유튜브 설정 (기록 일시 중지)
 # ==========================================
 def setup_youtube_no_history(d):
-    print("   🧹 유튜브 초기화...")
+    print("   🧹 유튜브 앱 데이터 초기화...")
     d.shell("pm clear com.google.android.youtube")
     time.sleep(3)
+    
+    print("   🔨 유튜브 실행...")
     d.shell("am start -n com.google.android.youtube/com.google.android.apps.youtube.app.WatchWhileActivity")
     time.sleep(12)
     nuke_popups(d)
     
-    print("   ⚙️ [설정] 기록 일시 중지(시크릿 효과) 적용 중...")
+    print("   ⚙️ [설정] 기록 일시 중지 적용 중...")
     
     # 1. 프로필 아이콘 클릭 (우상단)
     d.click(0.92, 0.05)
@@ -139,7 +142,7 @@ def setup_youtube_no_history(d):
     if d(text="Settings").exists:
         d(text="Settings").click()
     else:
-        # 400 에러 등으로 메뉴가 다를 수 있음 -> 스크롤 후 재시도
+        # 메뉴가 안 보이면 스크롤
         d.swipe(0.5, 0.8, 0.5, 0.2)
         if d(text="Settings").exists: d(text="Settings").click()
         
@@ -151,32 +154,32 @@ def setup_youtube_no_history(d):
     
     time.sleep(2)
     
-    # 4. Pause watch history 켜기
+    # 4. Pause watch history (스위치 켜기)
     if d(textContains="Pause watch history").exists:
         d(textContains="Pause watch history").click()
         time.sleep(1)
-        if d(text="Pause").exists: d(text="Pause").click() # 팝업 확인
+        if d(text="Pause").exists: d(text="Pause").click() # 확인 팝업
         
-    # 5. Pause search history 켜기
+    # 5. Pause search history (스위치 켜기)
     if d(textContains="Pause search history").exists:
         d(textContains="Pause search history").click()
         time.sleep(1)
-        if d(text="Pause").exists: d(text="Pause").click() # 팝업 확인
+        if d(text="Pause").exists: d(text="Pause").click() # 확인 팝업
         
     print("   ✅ 기록 일시 중지 완료")
     
-    # 홈으로 복귀
+    # 홈으로 복귀 (뒤로가기 연타)
     d.press("back")
     time.sleep(1)
     d.press("back")
     time.sleep(1)
     
-    # 혹시 모르니 홈 버튼 한번 누르기 (초기 화면으로)
+    # 혹시 모르니 홈 버튼 클릭
     if d(description="Home").exists:
         d(description="Home").click()
 
 # ==========================================
-# [3단계] 검색 및 분석 (입력 오류 수정)
+# [3단계] 검색 및 분석 (완전 개편)
 # ==========================================
 def perform_search_and_analyze(d, keyword, worksheet, count):
     print(f"\n🔎 [{count}] '{keyword}' 검색 시작...")
@@ -187,34 +190,38 @@ def perform_search_and_analyze(d, keyword, worksheet, count):
     elif d(resourceId="com.google.android.youtube:id/menu_item_search").exists: 
         d(resourceId="com.google.android.youtube:id/menu_item_search").click()
     else: 
-        d.click(0.85, 0.05) # 우상단
+        d.click(0.85, 0.05) # 우상단 강제
     
     time.sleep(2)
     nuke_popups(d)
     
-    # 2. ★ [핵심] 기존 검색어 지우기 (2회차부터 중요)
-    # 검색창에 텍스트가 있으면 X 버튼을 누르거나 지움
+    # 2. ★ [핵심] 기존 검색어 삭제 (2회차부터 필수)
+    # 검색창 X버튼(Clear)이 있으면 누르고, 없으면 텍스트 비우기
     search_box = d(resourceId="com.google.android.youtube:id/search_edit_text")
     
     if search_box.exists:
-        # X 버튼(지우기)이 있으면 클릭
+        # X 버튼 확인
         if d(resourceId="com.google.android.youtube:id/search_clear_button").exists:
+            print("   🧹 기존 검색어 삭제 (X 버튼)")
             d(resourceId="com.google.android.youtube:id/search_clear_button").click()
-        # 아니면 텍스트 비우기
-        search_box.clear_text()
+        else:
+            search_box.clear_text()
     
     time.sleep(1)
     
-    # 3. 검색어 입력 (ADB)
-    print(f"   ⌨️ '{keyword}' 입력...")
-    d.shell(f"input text '{keyword}'")
+    # 3. 검색어 입력 (복사 붙여넣기 효과)
+    print(f"   ⌨️ '{keyword}' 입력 (주입)...")
+    if search_box.exists:
+        search_box.set_text(keyword) # uiautomator2 set_text가 가장 확실함
+    else:
+        d.shell(f"input text '{keyword}'")
+        
     time.sleep(2)
     
-    # 4. 엔터 입력 (좌표 클릭 삭제 -> 순수 키 이벤트)
-    print("   🚀 검색 실행 (ENTER)...")
-    d.press("enter")
-    time.sleep(1)
-    d.shell("input keyevent 66")
+    # 4. ★ [핵심] 엔터 입력 (좌표 클릭 절대 금지!)
+    print("   🚀 검색 실행 (시스템 엔터)...")
+    # 키보드 엔터키(66) 전송 -> 가장 안전한 방법
+    d.shell("input keyevent 66") 
     
     time.sleep(8) # 로딩 대기
     
@@ -248,14 +255,12 @@ def perform_search_and_analyze(d, keyword, worksheet, count):
     }
     append_to_sheet(worksheet, data)
     
-    # 6. 다음 검색을 위해 뒤로가기 (홈 화면이 아니라 검색 목록 상태 유지도 가능하지만 안전하게 홈으로)
-    # 검색창 X 버튼을 눌러서 초기화하거나 뒤로가기
+    # 6. 다음 검색 준비 (뒤로가기)
+    # 뒤로가기를 눌러서 검색 목록이나 홈으로 이동
     if d(resourceId="com.google.android.youtube:id/search_clear_button").exists:
-        d(resourceId="com.google.android.youtube:id/search_clear_button").click()
-        d.press("back") # 키보드 내리기
-    else:
-        d.press("back")
-        d.press("back") # 홈으로
+        # 키보드가 떠있거나 검색창 활성 상태면 닫기
+        d.press("back") 
+    d.press("back") # 결과 화면에서 나가기
     time.sleep(2)
 
 def run_android_monitoring():
