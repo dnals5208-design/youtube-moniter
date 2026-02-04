@@ -17,22 +17,21 @@ jobs:
       with:
         python-version: '3.10'
 
-    - name: Install Dependencies (System)
+    - name: Install Dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y tesseract-ocr tesseract-ocr-kor libtesseract-dev net-tools privoxy
 
-    - name: Configure Privoxy (SOCKS5 -> HTTP Bridge)
+    - name: Configure Privoxy
       run: |
         echo 'forward-socks5t / 127.0.0.1:8080 .' | sudo tee -a /etc/privoxy/config
         sudo service privoxy restart
 
-    - name: Install Python Libraries
+    - name: Install Libraries
       run: |
-        # adbutils, uiautomator2 등 필수 라이브러리 명시
         pip install pandas uiautomator2 adbutils gspread oauth2client pytesseract Pillow
 
-    - name: Setup SSH Tunnel (Oracle Cloud)
+    - name: Setup SSH Tunnel
       env:
         ORACLE_KEY: ${{ secrets.ORACLE_KEY }}
         ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
@@ -41,13 +40,11 @@ jobs:
         mkdir -p ~/.ssh
         printf "%s\n" "$ORACLE_KEY" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
-        # SOCKS5 터널링 (8080 포트)
         ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ExitOnForwardFailure=yes -4 -D 8080 -f -C -N -i ~/.ssh/id_rsa $ORACLE_USER@$ORACLE_HOST
         sleep 5
 
     - name: 🛡️ [Diagnostics] Host IP Check
       run: |
-        # Privoxy를 통해 IP 확인
         HTTP_IP=$(curl -s -x http://127.0.0.1:8118 https://ipinfo.io/json)
         echo "   👉 Privoxy IP: $HTTP_IP"
         if [[ "$HTTP_IP" == *"KR"* ]] || [[ "$HTTP_IP" == *"Korea"* ]]; then
@@ -72,18 +69,18 @@ jobs:
         profile: Nexus 6
         ram-size: 2048M
         heap-size: 512M
-        # 프록시를 Privoxy(8118)로 설정 + 한국어 설정 시도
-        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-load -http-proxy http://127.0.0.1:8118 -prop persist.sys.language=ko -prop persist.sys.country=KR -prop persist.sys.locale=ko-KR
+        # ★ [핵심] timezone을 서울로 고정하고, 언어 설정도 한국어로 박음
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-load -http-proxy http://127.0.0.1:8118 -timezone Asia/Seoul -prop persist.sys.language=ko -prop persist.sys.country=KR -prop persist.sys.locale=ko-KR
         
         script: |
           echo "🚀 Android Booted."
           
-          echo "⏰ Enabling Auto-Time (Fix SSL/400 Errors)..."
-          # 관리자 권한 없이도 가능한 시간 동기화 설정
-          adb shell settings put global auto_time 1
-          adb shell settings put global auto_time_zone 1
+          echo "⏰ Fixing Timezone to Asia/Seoul (Critical for 400 Error)..."
+          # 자동 시간 설정을 끄고(0), 12/24시간제도 고정
+          adb shell settings put global auto_time 0
+          adb shell settings put global auto_time_zone 0
           
-          echo "💤 Waiting for app initialization (60s)..."
+          echo "💤 Waiting for system stabilization (60s)..."
           sleep 60
           
           echo "🔓 Unlocking Screen..."
