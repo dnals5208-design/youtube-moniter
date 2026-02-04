@@ -69,22 +69,23 @@ jobs:
         profile: Nexus 6
         ram-size: 2048M
         heap-size: 512M
-        # DNS 서버를 8.8.8.8로 강제 지정하여 네트워크 오류 최소화
-        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-load -http-proxy http://127.0.0.1:8118 -timezone Asia/Seoul -dns-server 8.8.8.8,8.8.4.4
+        # 에뮬레이터 옵션에서도 timezone 지정
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-load -http-proxy http://127.0.0.1:8118 -timezone Asia/Seoul
         
         script: |
           echo "🚀 Android Booted."
           
-          echo "⏰ [CRITICAL] Injecting Host Time to Emulator..."
+          echo "⏰ Setting Timezone to Asia/Seoul (Safe Mode)..."
           # 1. 자동 시간 설정 끄기
           adb shell settings put global auto_time 0
-          # 2. 호스트(서버)의 현재 시간을 포맷에 맞춰 에뮬레이터에 강제 주입 (가장 중요!)
-          # Android format: MMDDhhmm[[CC]YY][.ss]
+          adb shell settings put global auto_time_zone 0
+          
+          # 2. ★ [수정됨] 권한 에러 안 나는 명령어로 서울 시간대 설정
+          adb shell settings put global time_zone Asia/Seoul
+          
+          # 3. 현재 시간 강제 동기화 (Linux 시간 -> Android)
           CURRENT_TIME=$(date +%m%d%H%M%Y.%S)
           adb shell date $CURRENT_TIME
-          
-          # 3. 시간대 재확인
-          adb shell setprop persist.sys.timezone Asia/Seoul
           
           echo "💤 Waiting for system stabilization (60s)..."
           sleep 60
