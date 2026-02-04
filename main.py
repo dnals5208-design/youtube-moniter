@@ -9,17 +9,11 @@ import sys
 import pytesseract
 from PIL import Image
 
-# ==========================================
-# [설정]
-# ==========================================
 ADB_ADDR = "emulator-5554" 
 KEYWORDS = ["해커스", "토익", "경찰공무원", "소방공무원", "공무원"]
 REPEAT_COUNT = 10 
 SCREENSHOT_DIR = "screenshots"
 
-# ==========================================
-# [기능] 구글 시트 연결
-# ==========================================
 def get_worksheet():
     try:
         json_key = json.loads(os.environ['G_SHEET_KEY'])
@@ -28,15 +22,12 @@ def get_worksheet():
         creds = ServiceAccountCredentials.from_json_keyfile_dict(json_key, scope)
         client = gspread.authorize(creds)
         sh = client.open_by_key(sheet_id)
-        
         now = datetime.now()
         sheet_name = f"{now.year % 100}.{now.month}/{now.day}"
         header = ["날짜", "시간", "키워드", "회차", "광고여부", "비고"]
-        
         try:
             worksheet = sh.worksheet(sheet_name)
-            if not worksheet.get_all_values():
-                worksheet.append_row(header)
+            if not worksheet.get_all_values(): worksheet.append_row(header)
         except:
             worksheet = sh.add_worksheet(title=sheet_name, rows="1000", cols="20")
             worksheet.append_row(header)
@@ -53,9 +44,6 @@ def append_to_sheet(worksheet, data):
             print("   📤 시트 저장 완료")
         except: pass
 
-# ==========================================
-# [기능] OCR (화면 읽기)
-# ==========================================
 def read_screen_text(d, filename=None):
     try:
         temp_path = "current_screen.png"
@@ -68,95 +56,149 @@ def read_screen_text(d, filename=None):
     except: return ""
 
 # ==========================================
-# [기능] 팝업 제거 (단순화)
+# [기능] 팝업 청소기 (무조건 실행)
 # ==========================================
-def clear_popups(d):
-    """방해되는 팝업들 제거"""
+def nuke_popups(d):
+    """눈에 보이는 모든 방해꾼(로그인, 키보드, 약관)을 닫음"""
     try:
-        # 키보드 설정 팝업 (이게 제일 문제)
+        # 1. 크롬/구글 로그인 (Sign in, Welcome, Accept)
+        if d(textContains="Accept").exists: d(textContains="Accept").click()
+        if d(textContains="No thanks").exists: d(textContains="No thanks").click()
+        if d(textContains="No Thanks").exists: d(textContains="No Thanks").click()
+        if d(resourceId="com.android.chrome:id/negative_button").exists: d(resourceId="com.android.chrome:id/negative_button").click()
+        
+        # 2. 키보드 팝업 (Better keyboard) - 이게 검색 막는 주범
         if d(textContains="better keyboard").exists:
-            print("   🔨 키보드 팝업 제거")
-            if d(textContains="No, thanks").exists: d(textContains="No, thanks").click()
-            elif d(textContains="No thanks").exists: d(textContains="No thanks").click()
-            time.sleep(1)
-
-        # 크롬/유튜브 로그인
-        if d(textContains="Sign in").exists or d(textContains="Welcome").exists:
-            if d(textContains="No thanks").exists: d(textContains="No thanks").click()
-            elif d(resourceId="com.android.chrome:id/negative_button").exists: d(resourceId="com.android.chrome:id/negative_button").click()
-
-        # 400 에러
+            print("   🔨 [방해꾼] 키보드 팝업 발견 -> No thanks 클릭")
+            d(textContains="No").click()
+        
+        # 3. 400 에러 (RETRY)
         if d(text="RETRY").exists:
-            print("   ⚠️ 400 에러 -> RETRY 클릭")
+            print("   ⚠️ [오류] 400 에러 -> RETRY 클릭")
             d(text="RETRY").click()
-            time.sleep(2)
-            
-        # 기타
+            time.sleep(3)
+
+        # 4. 기타 프리미엄 권유
         if d(text="Skip trial").exists: d(text="Skip trial").click()
         if d(text="나중에").exists: d(text="나중에").click()
+        if d(text="Got it").exists: d(text="Got it").click()
     except: pass
 
 # ==========================================
-# [기능] IP 확인 (로딩 대기 추가)
+# [1단계] IP 확인 (선 청소 -> 후 접속)
 # ==========================================
 def check_ip_browser(d):
-    print("🌐 IP 확인 (크롬)...")
+    print("🌐 IP 확인 시작 (크롬 실행)...")
     d.shell("am force-stop com.android.chrome")
     d.app_start("com.android.chrome", stop=True)
     time.sleep(5)
-    clear_popups(d)
     
+    # ★ 핵심: 사이트 가기 전에 먼저 팝업부터 치움
+    print("   🧹 사이트 접속 전 팝업 청소...")
+    nuke_popups(d)
+    time.sleep(2)
+    
+    print("   🔗 ipinfo.io 접속...")
     d.shell('am start -a android.intent.action.VIEW -d "https://ipinfo.io/json" -p com.android.chrome')
     
-    # ★ [수정] 선생님 요청: 로딩 덜 된 상태 방지 (15초 대기)
-    print("   ⏳ 사이트 로딩 대기 (15초)...")
+    # 로딩 대기 (15초)
+    print("   ⏳ 로딩 대기 (15초)...")
     time.sleep(15)
     
-    clear_popups(d) # 로딩 후 뜨는 로그인 창 제거
+    # 접속 후에도 팝업이 떴을 수 있으니 한 번 더 청소
+    nuke_popups(d)
     
-    print("📸 IP 확인 화면 캡처 중...")
+    print("📸 IP 확인 화면 캡처")
     read_screen_text(d, filename="DEBUG_IP_CHECK.png")
 
 # ==========================================
-# [기능] 유튜브 실행 (앱 터치 방식 복원)
+# [2단계] 유튜브 실행 (초기화 + 우하단 진입)
 # ==========================================
 def setup_youtube(d):
-    print("   🔨 유튜브 실행 및 시크릿 모드 진입...")
-    d.shell("am force-stop com.google.android.youtube")
-    # 메인 화면으로 강제 시작
+    print("   🧹 유튜브 앱 데이터 완전 초기화 (400 에러 방지)...")
+    d.shell("pm clear com.google.android.youtube") # 앱 초기화 (로그아웃됨)
+    time.sleep(2)
+    
+    print("   🔨 유튜브 실행...")
     d.shell("am start -n com.google.android.youtube/com.google.android.apps.youtube.app.WatchWhileActivity")
     time.sleep(10)
     
-    clear_popups(d)
+    nuke_popups(d)
     
-    print("   🕵️ 시크릿 모드 진입 시도...")
+    # 선생님 말씀대로 [우하단 -> 중앙] 시도
+    print("   🕵️ 시크릿 모드 진입 (우하단 Library -> 중앙)...")
     
-    # 프로필 아이콘
-    if d(description="Account").exists: d(description="Account").click()
-    elif d(resourceId="com.google.android.youtube:id/mobile_user_account_image").exists:
-        d(resourceId="com.google.android.youtube:id/mobile_user_account_image").click()
-    else: d.click(0.92, 0.05) # 우상단
+    # 1. 우하단 'Library' (보관함) 클릭
+    d.click(0.9, 0.95) 
+    time.sleep(3)
+    
+    # 2. 팝업 청소 (로그인하라고 뜰 수 있음)
+    nuke_popups(d)
+    
+    # 3. 화면 중앙에 'Sign in'이나 'Account' 관련 버튼이 뜨면 클릭
+    # (보통 초기화 상태에서 Library 누르면 중앙에 로그인 버튼 뜸)
+    if d(textContains="Sign in").exists:
+        d(textContains="Sign in").click()
+    else:
+        # 없다면 우상단 프로필 아이콘이라도 누름 (안전장치)
+        print("   ⚠️ 중앙 버튼 없음, 우상단 프로필 클릭 시도")
+        d.click(0.92, 0.05)
+        
+    time.sleep(2)
+    
+    # 4. 시크릿 모드 메뉴 클릭
+    if d(textContains="Turn on Incognito").exists:
+        d(textContains="Turn on Incognito").click()
+        print("   ✅ 시크릿 모드 켜기 성공")
+    elif d(resourceId="com.google.android.youtube:id/new_incognito_session_item").exists:
+        d(resourceId="com.google.android.youtube:id/new_incognito_session_item").click()
+        print("   ✅ 시크릿 모드 켜기 성공 (ID)")
+    else:
+        print("   ⚠️ 시크릿 메뉴 못 찾음 (일단 진행)")
+
+    time.sleep(4)
+    if d(text="Got it").exists: d(text="Got it").click()
+
+# ==========================================
+# [3단계] 검색 (키보드 팝업 감시)
+# ==========================================
+def perform_search(d, keyword):
+    print("   🔍 검색 시도...")
+    
+    # 1. 돋보기 버튼 클릭
+    if d(description="Search").exists: d(description="Search").click()
+    elif d(resourceId="com.google.android.youtube:id/menu_item_search").exists: d(resourceId="com.google.android.youtube:id/menu_item_search").click()
+    else: d.click(0.85, 0.05)
     
     time.sleep(2)
-    clear_popups(d) # 혹시 잘못 눌렀으면 복구
+    
+    # ★ 핵심: 키보드 팝업(Better keyboard)이 뜨면 즉시 닫아야 함
+    if d(textContains="better keyboard").exists:
+        print("   🔨 검색 전 키보드 팝업 제거")
+        d(textContains="No").click()
+        time.sleep(1)
+        # 팝업 닫고 다시 검색창 누르기
+        if d(resourceId="com.google.android.youtube:id/search_edit_text").exists:
+             d(resourceId="com.google.android.youtube:id/search_edit_text").click()
+    
+    # 2. 텍스트 입력 (set_text 방식: 키보드 안 쓰고 주입)
+    print(f"   ⌨️ '{keyword}' 입력...")
+    search_box = d(resourceId="com.google.android.youtube:id/search_edit_text")
+    if search_box.exists:
+        search_box.set_text(keyword)
+    else:
+        d.shell(f"input text '{keyword}'")
+    
+    time.sleep(1)
+    
+    # 3. 엔터 입력
+    d.press("enter")
+    time.sleep(1)
+    
+    # ★ 엔터 안 먹혔을 때를 대비해 파란 버튼 위치 강제 클릭
+    d.click(0.9, 0.9)
+    time.sleep(8)
 
-    # 메뉴 선택
-    if d(resourceId="com.google.android.youtube:id/new_incognito_session_item").exists:
-        d(resourceId="com.google.android.youtube:id/new_incognito_session_item").click()
-        print("   ✅ 시크릿 모드 클릭")
-    elif d(textContains="Turn on Incognito").exists:
-        d(textContains="Turn on Incognito").click()
-        print("   ✅ Turn on Incognito 클릭")
-    elif d(textContains="시크릿 모드").exists:
-        d(textContains="시크릿 모드").click()
-
-    time.sleep(5)
-    if d(text="Got it").exists: d(text="Got it").click()
-    if d(text="확인").exists: d(text="확인").click()
-
-# ==========================================
-# [메인] 실행 로직
-# ==========================================
 def run_android_monitoring():
     ws = get_worksheet()
     print(f"📱 [MO] 에뮬레이터 연결...")
@@ -165,10 +207,10 @@ def run_android_monitoring():
         os.system("adb wait-for-device")
         d = u2.connect(ADB_ADDR)
         
-        # 1. IP 확인 (대기 시간 늘림)
+        # 1. IP 확인 (무조건 팝업 끄고 찍음)
         check_ip_browser(d)
         
-        # 2. 유튜브 실행
+        # 2. 유튜브 (앱 초기화 -> 우하단 -> 시크릿)
         setup_youtube(d)
 
         for keyword in KEYWORDS:
@@ -178,59 +220,32 @@ def run_android_monitoring():
                 sys.stdout.flush()
                 print(f"   [{i}/{REPEAT_COUNT}] 진행 중...", end=" ")
                 
-                # 앱 이탈 체크
+                # 앱 이탈 시 복귀
                 if d.app_current()['package'] != "com.google.android.youtube":
-                    print("⚠️ 유튜브 복귀...")
                     d.shell("am start -n com.google.android.youtube/com.google.android.apps.youtube.app.WatchWhileActivity")
                     time.sleep(5)
+                
+                # 400 에러 있으면 RETRY 누르고 대기
+                nuke_popups(d) 
 
-                # 400 에러 체크 (검색 전)
-                clear_popups(d)
-
-                # 1. 돋보기 버튼 클릭
-                if d(resourceId="com.google.android.youtube:id/menu_item_search").exists:
-                    d(resourceId="com.google.android.youtube:id/menu_item_search").click()
-                elif d(description="Search").exists:
-                    d(description="Search").click()
-                else:
-                    d.click(0.85, 0.05)
+                # 검색 수행
+                perform_search(d, keyword)
                 
-                time.sleep(2)
-
-                # ★ [핵심 수정] 키보드 팝업이 뜨면 닫고 -> 다시 검색창 누르고 -> 입력
-                if d(textContains="better keyboard").exists:
-                    print("   🔨 키보드 팝업 제거")
-                    d(textContains="No, thanks").click()
-                    time.sleep(1)
-                    # 팝업 닫히면 포커스 잃을 수 있으므로 다시 검색창 클릭
-                    if d(resourceId="com.google.android.youtube:id/search_edit_text").exists:
-                        d(resourceId="com.google.android.youtube:id/search_edit_text").click()
-                    time.sleep(1)
+                # 결과 찍기 전 한번 더 팝업 확인
+                nuke_popups(d)
                 
-                # 2. 입력 (선생님이 쓰던 방식 복원)
-                d.clear_text()
-                d.send_keys(keyword)
-                time.sleep(1)
-                
-                # 3. 엔터
-                d.press("enter")
-                time.sleep(8)
-                
-                # 4. 결과 확인
-                clear_popups(d)
                 screen_text = read_screen_text(d, filename=f"{keyword}_{i}_top.png")
                 
-                # 오류 화면이면 재시도 로직
-                if any(x in screen_text for x in ["problem", "RETRY", "400"]):
-                    print("🧹 [복구] 400 에러 발견. 재시도.")
-                    clear_popups(d)
+                # 오류 발견 시
+                if "problem" in screen_text or "RETRY" in screen_text:
+                    print("🧹 400 에러 발견 -> 복구 시도")
+                    nuke_popups(d)
                     time.sleep(3)
                     screen_text = read_screen_text(d, filename=f"{keyword}_{i}_retry.png")
 
                 d.swipe(500, 1500, 500, 500, 0.3) 
                 time.sleep(2)
                 
-                # 광고 판별
                 is_ad = "X"
                 ad_text = "-"
                 if any(x in screen_text for x in ["광고", "Ad", "Sponsored"]):
@@ -251,8 +266,6 @@ def run_android_monitoring():
                 }
                 append_to_sheet(ws, result_data)
                 
-                d.press("back")
-                time.sleep(1)
                 d.press("back")
                 time.sleep(2)
                 
