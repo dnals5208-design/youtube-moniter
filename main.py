@@ -1,3 +1,4 @@
+# [Code A] Rollback Version (Stable)
 import time
 import uiautomator2 as u2
 import os
@@ -8,14 +9,12 @@ from datetime import datetime
 import sys
 import pytesseract
 from PIL import Image
-import random
-import uuid
 
 # ==========================================
 # [설정]
 # ==========================================
 ADB_ADDR = "emulator-5554" 
-KEYWORDS = ["해커스"] 
+KEYWORDS = ["해커스"] # 일단 해커스만 테스트
 REPEAT_COUNT = 10 
 SCREENSHOT_DIR = "screenshots"
 
@@ -102,26 +101,10 @@ def nuke_popups(d):
         if d(textContains="No thanks").exists: d(textContains="No thanks").click()
         if d(textContains="better keyboard").exists: d(textContains="No").click()
         if d(text="Skip trial").exists: d(text="Skip trial").click()
-        if d(textContains="Pause").exists and d(textContains="history").exists: 
+        # 기록 일시 중지 확인 팝업
+        if d(textContains="Pause").exists and d(textContains="history").exists:
              d(text="Pause").click()
-        if d(textContains="Try searching").exists: d.click(0.5, 0.2)
     except: pass
-
-# ==========================================
-# [0단계] 가짜 유저 프로필 주입 (광고 활성화 비법)
-# ==========================================
-def inject_fake_user_profile(d):
-    print("🎭 [속임수] 가짜 광고 ID(Advertising ID) 주입 중...")
-    
-    # 랜덤 UUID 생성 (가짜 광고 ID)
-    fake_ad_id = str(uuid.uuid4())
-    
-    # ADB 명령어로 광고 ID 강제 설정
-    d.shell(f"settings put global google_ad_id {fake_ad_id}")
-    d.shell("settings put global ad_id_enabled 1") # 광고 추적 허용
-    d.shell("settings put secure limit_ad_tracking 0") # 광고 추적 제한 해제
-    
-    print(f"   ✅ 가짜 ID 주입 완료: {fake_ad_id[:8]}...")
 
 # ==========================================
 # [1단계] IP 확인
@@ -138,102 +121,110 @@ def check_ip_browser(d):
     read_screen_text(d, filename="DEBUG_1_IP.png")
 
 # ==========================================
-# [2단계] 유튜브 설정 (웜업 + 기록중지)
+# [2단계] 유튜브 설정 (기록 일시 중지)
 # ==========================================
 def setup_youtube_no_history(d):
-    print("   🧹 유튜브 초기화...")
+    print("   🧹 유튜브 앱 데이터 초기화...")
     d.shell("pm clear com.google.android.youtube")
     time.sleep(3)
     
-    # ★ 실행 전 광고 ID 주입
-    inject_fake_user_profile(d)
-    
+    print("   🔨 유튜브 실행...")
     d.shell("am start -n com.google.android.youtube/com.google.android.apps.youtube.app.WatchWhileActivity")
     time.sleep(12)
     nuke_popups(d)
     
-    # ★ [핵심] 웜업: 홈 화면을 좀 구경해야 광고 서버가 깨어남
-    print("   🔥 [웜업] 홈 화면 둘러보는 중 (광고 로딩 유도)...")
-    for _ in range(3):
-        d.swipe(0.5, 0.8, 0.5, 0.3) # 아래로 스크롤
-        time.sleep(2)
-    d.click(0.1, 0.95) # 홈 버튼 클릭 (맨 위로)
-    time.sleep(2)
-
-    print("   ⚙️ [설정] 기록 일시 중지 적용...")
-    d.click(0.92, 0.05) # 프로필
+    print("   ⚙️ [설정] 기록 일시 중지 적용 중...")
+    
+    # 1. 프로필 아이콘 클릭 (우상단)
+    d.click(0.92, 0.05)
     time.sleep(2)
     
+    # 2. Settings 클릭
     if d(text="Settings").exists:
         d(text="Settings").click()
     else:
+        # 메뉴가 안 보이면 스크롤
         d.swipe(0.5, 0.8, 0.5, 0.2)
         if d(text="Settings").exists: d(text="Settings").click()
         
     time.sleep(2)
-    if d(textContains="History").exists: d(textContains="History").click()
+    
+    # 3. History & privacy 클릭
+    if d(textContains="History").exists:
+        d(textContains="History").click()
+    
     time.sleep(2)
     
+    # 4. Pause watch history (스위치 켜기)
     if d(textContains="Pause watch history").exists:
         d(textContains="Pause watch history").click()
         time.sleep(1)
-        if d(text="Pause").exists: d(text="Pause").click()
+        if d(text="Pause").exists: d(text="Pause").click() # 확인 팝업
         
+    # 5. Pause search history (스위치 켜기)
     if d(textContains="Pause search history").exists:
         d(textContains="Pause search history").click()
         time.sleep(1)
-        if d(text="Pause").exists: d(text="Pause").click()
+        if d(text="Pause").exists: d(text="Pause").click() # 확인 팝업
         
     print("   ✅ 기록 일시 중지 완료")
     
-    # 홈으로 복귀
+    # 홈으로 복귀 (뒤로가기 연타)
     d.press("back")
     time.sleep(1)
     d.press("back")
     time.sleep(1)
-    if d(description="Home").exists: d(description="Home").click()
+    
+    # 혹시 모르니 홈 버튼 클릭
+    if d(description="Home").exists:
+        d(description="Home").click()
 
 # ==========================================
-# [3단계] 검색 및 분석
+# [3단계] 검색 및 분석 (완전 개편)
 # ==========================================
 def perform_search_and_analyze(d, keyword, worksheet, count):
     print(f"\n🔎 [{count}] '{keyword}' 검색 시작...")
     
     # 1. 돋보기 클릭
-    if d(description="Search").exists: d(description="Search").click()
-    elif d(resourceId="com.google.android.youtube:id/menu_item_search").exists: d(resourceId="com.google.android.youtube:id/menu_item_search").click()
-    else: d.click(0.85, 0.05)
+    if d(description="Search").exists: 
+        d(description="Search").click()
+    elif d(resourceId="com.google.android.youtube:id/menu_item_search").exists: 
+        d(resourceId="com.google.android.youtube:id/menu_item_search").click()
+    else: 
+        d.click(0.85, 0.05) # 우상단 강제
     
     time.sleep(2)
     nuke_popups(d)
     
-    # 2. 검색어 삭제 및 입력
+    # 2. ★ [핵심] 기존 검색어 삭제 (2회차부터 필수)
+    # 검색창 X버튼(Clear)이 있으면 누르고, 없으면 텍스트 비우기
     search_box = d(resourceId="com.google.android.youtube:id/search_edit_text")
+    
     if search_box.exists:
+        # X 버튼 확인
         if d(resourceId="com.google.android.youtube:id/search_clear_button").exists:
+            print("   🧹 기존 검색어 삭제 (X 버튼)")
             d(resourceId="com.google.android.youtube:id/search_clear_button").click()
         else:
             search_box.clear_text()
     
     time.sleep(1)
     
-    print(f"   ⌨️ '{keyword}' 입력...")
-    d.shell(f"input text '{keyword}'")
+    # 3. 검색어 입력 (복사 붙여넣기 효과)
+    print(f"   ⌨️ '{keyword}' 입력 (주입)...")
+    if search_box.exists:
+        search_box.set_text(keyword) # uiautomator2 set_text가 가장 확실함
+    else:
+        d.shell(f"input text '{keyword}'")
+        
     time.sleep(2)
     
-    # 3. 검색 실행
-    print("   🚀 검색 실행 (ENTER)...")
+    # 4. ★ [핵심] 엔터 입력 (좌표 클릭 절대 금지!)
+    print("   🚀 검색 실행 (시스템 엔터)...")
+    # 키보드 엔터키(66) 전송 -> 가장 안전한 방법
     d.shell("input keyevent 66") 
     
-    print("   ⏳ 광고 로딩 대기 (12초)...")
-    time.sleep(12) # 대기 시간 조금 더 늘림
-    
-    # 4. 화면 정리 (키보드 닫고 맨 위로)
-    print("   🧹 화면 정리...")
-    d.press("back")
-    time.sleep(1)
-    d.swipe(0.5, 0.3, 0.5, 0.8, 0.3)
-    time.sleep(2)
+    time.sleep(8) # 로딩 대기
     
     # 5. 결과 분석
     screen_text = read_screen_text(d, filename=f"{keyword}_{count}.png")
@@ -241,8 +232,7 @@ def perform_search_and_analyze(d, keyword, worksheet, count):
     is_ad = "X"
     ad_corp, ad_detail, ad_type, ad_title = "-", "-", "-", "-"
     
-    # 광고 키워드 (대소문자/한글 모두)
-    if any(x in screen_text for x in ["Ad", "Sponsored", "광고", "Promoted", "방문하기"]):
+    if "Ad" in screen_text or "광고" in screen_text or "Sponsored" in screen_text:
         is_ad = "O"
         if "조회수" in screen_text or "views" in screen_text: ad_type = "영상광고"
         else: ad_type = "배너/검색광고"
@@ -256,7 +246,7 @@ def perform_search_and_analyze(d, keyword, worksheet, count):
         ad_corp, ad_detail = classify_advertiser(screen_text)
         print(f"   🚨 광고 발견! [{ad_corp}]")
     else:
-        print("   ❌ 광고 없음 (혹은 미인식)")
+        print("   ❌ 광고 없음")
         
     data = {
         "시간": datetime.now().strftime('%H:%M:%S'),
@@ -266,21 +256,25 @@ def perform_search_and_analyze(d, keyword, worksheet, count):
     }
     append_to_sheet(worksheet, data)
     
-    # 6. 복귀
+    # 6. 다음 검색 준비 (뒤로가기)
+    # 뒤로가기를 눌러서 검색 목록이나 홈으로 이동
     if d(resourceId="com.google.android.youtube:id/search_clear_button").exists:
-        d.press("back")
-    d.press("back")
+        # 키보드가 떠있거나 검색창 활성 상태면 닫기
+        d.press("back") 
+    d.press("back") # 결과 화면에서 나가기
     time.sleep(2)
 
 def run_android_monitoring():
     ws = get_worksheet()
-    print(f"📱 [MO] 모니터링 시작 (Fake User ID 적용)...")
+    print(f"📱 [MO] 모니터링 시작 (기록중지 모드)...")
 
     try:
         os.system("adb wait-for-device")
         d = u2.connect(ADB_ADDR)
         
         check_ip_browser(d)
+        
+        # ★ 시크릿 모드 대신 '설정' 변경
         setup_youtube_no_history(d)
 
         for keyword in KEYWORDS:
