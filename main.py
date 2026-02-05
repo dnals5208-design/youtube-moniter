@@ -8,7 +8,6 @@ from datetime import datetime
 import sys
 import pytesseract
 from PIL import Image
-import uuid # 랜덤 ID 생성을 위해 필요
 
 # ==========================================
 # [설정]
@@ -17,6 +16,8 @@ ADB_ADDR = "emulator-5554"
 KEYWORDS = ["해커스"] 
 REPEAT_COUNT = 10 
 SCREENSHOT_DIR = "screenshots"
+# 고정 광고 ID (신뢰도 유지를 위해 고정)
+FIXED_AD_ID = "38400000-8cf0-11bd-b23e-10b96e4ef00d" 
 
 # ==========================================
 # [함수] 광고주 분류
@@ -51,7 +52,7 @@ def get_worksheet():
         sh = client.open_by_key(sheet_id)
         now = datetime.now()
         sheet_name = f"{now.year % 100}.{now.month}/{now.day}"
-        header = ["시간", "키워드", "회차", "광고여부", "광고주_구분", "상세_광고주", "광고형태", "제목/텍스트", "Ad_ID"]
+        header = ["시간", "키워드", "회차", "광고여부", "광고주_구분", "상세_광고주", "광고형태", "제목/텍스트", "앱버전", "모드"]
         try:
             worksheet = sh.worksheet(sheet_name)
             print(f"   📄 기존 시트 '{sheet_name}' 초기화...")
@@ -72,7 +73,7 @@ def append_to_sheet(worksheet, data):
             row = [
                 data["시간"], data["키워드"], data["회차"], 
                 data["광고여부"], data["광고주_구분"], data["상세_광고주"],
-                data["광고형태"], data["제목/텍스트"], data["Ad_ID"]
+                data["광고형태"], data["제목/텍스트"], data["앱버전"], data["모드"]
             ]
             worksheet.append_row(row)
             print("   📤 시트 저장 완료")
@@ -90,90 +91,116 @@ def read_screen_text(d, filename=None):
     except: return ""
 
 def nuke_popups(d):
-    """초기화된 앱에서 뜨는 팝업 제거"""
+    """방해꾼 제거"""
     try:
         if d(textContains="Accept").exists: d(textContains="Accept").click()
         if d(textContains="No thanks").exists: d(textContains="No thanks").click()
         if d(textContains="better keyboard").exists: d(textContains="No").click()
+        if d(text="Skip trial").exists: d(text="Skip trial").click()
         if d(textContains="Try searching").exists: d.click(0.5, 0.2)
-        # 로그인 유도 팝업 무시 (좌상단 X 누르기 대신 그냥 닫기 시도)
+        # 로그인 유도 팝업 무시
         if d(textContains="Sign in").exists: 
-             # SKIP 버튼이 있으면 클릭, 없으면 무시
              if d(textContains="Skip").exists: d(textContains="Skip").click()
+             else: d.click(0.07, 0.07) # 좌상단 X 시도
     except: pass
 
-# ==========================================
-# [핵심] 랜덤 광고 ID 주입 (매번 신분 세탁)
-# ==========================================
-def inject_random_ad_id(d):
-    # 매번 새로운 랜덤 UUID 생성
-    random_id = str(uuid.uuid4())
-    print(f"   🎭 [신분세탁] 새로운 Advertising ID 발급: {random_id}")
-    
-    d.shell(f"settings put global google_ad_id {random_id}")
+def inject_fixed_ad_id(d):
+    print(f"   💉 고정 Advertising ID 주입: {FIXED_AD_ID}")
+    d.shell(f"settings put global google_ad_id {FIXED_AD_ID}")
     d.shell("settings put global ad_id_enabled 1")
     d.shell("settings put secure limit_ad_tracking 0")
-    return random_id
 
-def check_ip_browser(d):
-    print("🌐 IP 확인 시작...")
-    d.shell("am force-stop com.android.chrome")
-    d.app_start("com.android.chrome", stop=True)
-    time.sleep(5)
-    nuke_popups(d)
-    d.shell('am start -a android.intent.action.VIEW -d "https://ipinfo.io/json" -p com.android.chrome')
-    time.sleep(15)
-    nuke_popups(d)
-    read_screen_text(d, filename="DEBUG_1_IP.png")
+def check_youtube_version(d):
+    try:
+        version_output = d.shell("dumpsys package com.google.android.youtube | grep versionName").output.strip()
+        print(f"\n   📱 [앱정보] YouTube Version: {version_output}")
+        if "=" in version_output: return version_output.split("=")[1]
+        return version_output
+    except: return "Unknown"
 
 # ==========================================
-# [설정] 유튜브 완전 초기화 실행
+# [기능] 수동으로 기록 삭제 (소프트 리셋)
 # ==========================================
-def setup_youtube_fresh(d):
-    print("   🧹 유튜브 앱 데이터 완전 삭제 (시크릿 효과)...")
+def manual_clear_history(d):
+    print("   🧹 [Soft Reset] 설정에서 검색/시청 기록 삭제 중...")
+    
+    # 1. 프로필 아이콘 클릭
+    d.click(0.92, 0.05) 
+    time.sleep(1)
+    
+    # 2. Settings 진입
+    if d(text="Settings").exists:
+        d(text="Settings").click()
+    else:
+        d.swipe(0.5, 0.8, 0.5, 0.2)
+        if d(text="Settings").exists: d(text="Settings").click()
+    time.sleep(1)
+    
+    # 3. History & privacy
+    if d(textContains="History").exists: d(textContains="History").click()
+    time.sleep(1)
+    
+    # 4. Clear watch history
+    if d(textContains="Clear watch history").exists:
+        d(textContains="Clear watch history").click()
+        time.sleep(1)
+        if d(text="Clear watch history").exists: d(text="Clear watch history").click() # 확인 팝업
+        
+    # 5. Clear search history
+    if d(textContains="Clear search history").exists:
+        d(textContains="Clear search history").click()
+        time.sleep(1)
+        if d(text="Clear search history").exists: d(text="Clear search history").click() # 확인 팝업
+        
+    print("   ✅ 기록 삭제 완료 (신뢰도 유지)")
+    
+    # 홈으로 복귀
+    d.press("back"); time.sleep(0.5)
+    d.press("back"); time.sleep(0.5)
+    d.press("back"); time.sleep(0.5)
+    if d(description="Home").exists: d(description="Home").click()
+
+# ==========================================
+# [설정] 최초 1회 실행
+# ==========================================
+def setup_youtube_persistent(d):
+    print("   🚀 유튜브 최초 실행 (데이터 유지 모드)...")
+    # 처음 딱 한 번만 클리어 (깨끗한 시작)
     d.shell("pm clear com.google.android.youtube") 
-    time.sleep(2)
+    time.sleep(3)
+    inject_fixed_ad_id(d)
     
-    # ★ 랜덤 ID 주입
-    current_ad_id = inject_random_ad_id(d)
-    
-    print("   🔨 유튜브 실행...")
     d.shell("am start -n com.google.android.youtube/com.google.android.apps.youtube.app.WatchWhileActivity")
     time.sleep(10)
-    
-    # 초기 실행 시 뜨는 '알림 허용', '로그인' 팝업 처리
-    if d(textContains="Allow").exists: d(textContains="Allow").click()
-    if d(textContains="Sign in").exists: 
-        # 로그인 팝업이 뜨면 바깥쪽 클릭하거나 닫기 시도 안 해도 됨 (검색 누르면 사라짐)
-        pass
-        
-    return current_ad_id
+    nuke_popups(d)
 
 # ==========================================
 # [3단계] 검색 및 분석
 # ==========================================
-def perform_search_and_analyze(d, keyword, worksheet, count, current_ad_id):
+def perform_search_and_analyze(d, keyword, worksheet, count, app_ver):
     print(f"\n🔎 [{count}] '{keyword}' 검색 시작...")
     
     # 1. 돋보기 클릭
-    # 앱 초기화 직후에는 상단에 돋보기가 바로 보임
-    if d(description="Search").exists: 
-        d(description="Search").click()
-    elif d(resourceId="com.google.android.youtube:id/menu_item_search").exists: 
-        d(resourceId="com.google.android.youtube:id/menu_item_search").click()
-    else: 
-        d.click(0.85, 0.05) # 우상단
-    
-    time.sleep(2)
+    if not d(resourceId="com.google.android.youtube:id/search_edit_text").exists:
+        if d(description="Search").exists: d(description="Search").click()
+        elif d(resourceId="com.google.android.youtube:id/menu_item_search").exists: d(resourceId="com.google.android.youtube:id/menu_item_search").click()
+        else: d.click(0.85, 0.05)
+        time.sleep(2)
+        
     nuke_popups(d)
     
-    # 2. 검색어 입력 (커서 잡고 입력)
+    # 2. 텍스트 입력
     search_box = d(resourceId="com.google.android.youtube:id/search_edit_text")
     if search_box.exists:
-        search_box.click()
+        search_box.click() 
         time.sleep(1)
-        # 초기화 상태라 기존 텍스트 없음
-        
+        # 기존 내용 삭제 (혹시 남아있다면)
+        if d(resourceId="com.google.android.youtube:id/search_clear_button").exists:
+            d(resourceId="com.google.android.youtube:id/search_clear_button").click()
+        else:
+            search_box.clear_text()
+    
+    time.sleep(1)
     print(f"   ⌨️ '{keyword}' 입력...")
     d.shell(f"input text '{keyword}'")
     time.sleep(2)
@@ -185,30 +212,25 @@ def perform_search_and_analyze(d, keyword, worksheet, count, current_ad_id):
     print("   ⏳ 광고 로딩 대기 (10초)...")
     time.sleep(10)
     
-    # 4. 화면 정리 (키보드 닫기)
-    d.press("back") 
+    # 4. 화면 정리
+    d.press("back") # 키보드 닫기
     time.sleep(1)
     d.swipe(0.5, 0.3, 0.5, 0.8, 0.3) # 맨 위로
     time.sleep(2)
     
-    # 5. 결과 분석
     screen_text = read_screen_text(d, filename=f"{keyword}_{count}.png")
     
     is_ad = "X"
     ad_corp, ad_detail, ad_type, ad_title = "-", "-", "-", "-"
     
-    # 광고 키워드 (방문하기, 설치하기 등 추가)
-    if any(x in screen_text for x in ["Ad", "Sponsored", "광고", "Promoted", "방문하기", "설치하기"]):
+    if any(x in screen_text for x in ["Ad", "Sponsored", "광고", "Promoted"]):
         is_ad = "O"
         if "조회수" in screen_text or "views" in screen_text: ad_type = "영상광고"
         else: ad_type = "배너/검색광고"
-            
         lines = [line for line in screen_text.split('\n') if len(line) > 5]
         for line in lines:
             if "광고" not in line and "Ad" not in line:
-                ad_title = line
-                break
-        
+                ad_title = line; break
         ad_corp, ad_detail = classify_advertiser(screen_text)
         print(f"   🚨 광고 발견! [{ad_corp}]")
     else:
@@ -219,29 +241,35 @@ def perform_search_and_analyze(d, keyword, worksheet, count, current_ad_id):
         "키워드": keyword, "회차": count, "광고여부": is_ad,
         "광고주_구분": ad_corp, "상세_광고주": ad_detail,
         "광고형태": ad_type, "제목/텍스트": ad_title,
-        "Ad_ID": current_ad_id
+        "앱버전": app_ver, "모드": "Soft Reset"
     }
     append_to_sheet(worksheet, data)
+    
+    # 5. 뒤로가기 후 기록 삭제 (다음 검색 준비)
+    d.press("back") 
+    time.sleep(1)
+    
+    # ★ 여기서 기록 삭제 실행
+    manual_clear_history(d)
 
 def run_android_monitoring():
     ws = get_worksheet()
-    print(f"📱 [MO] 모니터링 시작 (무한 초기화 모드)...")
-
+    print(f"📱 [MO] 모니터링 시작 (Soft Reset Mode)...")
     try:
         os.system("adb wait-for-device")
         d = u2.connect(ADB_ADDR)
         
-        check_ip_browser(d)
-        
+        app_ver = check_youtube_version(d)
+        setup_youtube_persistent(d) # 최초 1회만 실행
+
         for keyword in KEYWORDS:
             for i in range(1, REPEAT_COUNT + 1):
-                print(f"\n🔄 [Reset] {i}회차 시작 전 데이터 초기화...")
-                # ★ 핵심: 매 회차마다 앱을 초기화하고 새로운 ID를 부여함
-                # 이것이 '비로그인 시크릿 모드'와 동일한 효과를 냄
-                current_ad_id = setup_youtube_fresh(d)
+                if d.app_current()['package'] != "com.google.android.youtube":
+                    d.shell("am start -n com.google.android.youtube/com.google.android.apps.youtube.app.WatchWhileActivity")
+                    time.sleep(5)
                 
                 nuke_popups(d)
-                perform_search_and_analyze(d, keyword, ws, i, current_ad_id)
+                perform_search_and_analyze(d, keyword, ws, i, app_ver)
                 
     except Exception as e:
         print(f"에러 발생: {e}")
