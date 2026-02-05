@@ -16,7 +16,6 @@ ADB_ADDR = "emulator-5554"
 KEYWORDS = ["해커스"] 
 REPEAT_COUNT = 10 
 SCREENSHOT_DIR = "screenshots"
-# 고정 광고 ID (신뢰도 유지를 위해 고정)
 FIXED_AD_ID = "38400000-8cf0-11bd-b23e-10b96e4ef00d" 
 
 # ==========================================
@@ -91,17 +90,15 @@ def read_screen_text(d, filename=None):
     except: return ""
 
 def nuke_popups(d):
-    """방해꾼 제거"""
     try:
         if d(textContains="Accept").exists: d(textContains="Accept").click()
         if d(textContains="No thanks").exists: d(textContains="No thanks").click()
         if d(textContains="better keyboard").exists: d(textContains="No").click()
         if d(text="Skip trial").exists: d(text="Skip trial").click()
         if d(textContains="Try searching").exists: d.click(0.5, 0.2)
-        # 로그인 유도 팝업 무시
         if d(textContains="Sign in").exists: 
              if d(textContains="Skip").exists: d(textContains="Skip").click()
-             else: d.click(0.07, 0.07) # 좌상단 X 시도
+             else: d.click(0.07, 0.07) # 좌상단 X
     except: pass
 
 def inject_fixed_ad_id(d):
@@ -119,42 +116,34 @@ def check_youtube_version(d):
     except: return "Unknown"
 
 # ==========================================
-# [기능] 수동으로 기록 삭제 (소프트 리셋)
+# [기능] 수동 기록 삭제 (Soft Reset)
 # ==========================================
 def manual_clear_history(d):
-    print("   🧹 [Soft Reset] 설정에서 검색/시청 기록 삭제 중...")
-    
-    # 1. 프로필 아이콘 클릭
-    d.click(0.92, 0.05) 
+    print("   🧹 [Soft Reset] 설정에서 기록 삭제 시도...")
+    d.click(0.92, 0.05) # 프로필
     time.sleep(1)
     
-    # 2. Settings 진입
-    if d(text="Settings").exists:
-        d(text="Settings").click()
+    if d(text="Settings").exists: d(text="Settings").click()
     else:
         d.swipe(0.5, 0.8, 0.5, 0.2)
         if d(text="Settings").exists: d(text="Settings").click()
     time.sleep(1)
     
-    # 3. History & privacy
     if d(textContains="History").exists: d(textContains="History").click()
     time.sleep(1)
     
-    # 4. Clear watch history
     if d(textContains="Clear watch history").exists:
         d(textContains="Clear watch history").click()
         time.sleep(1)
-        if d(text="Clear watch history").exists: d(text="Clear watch history").click() # 확인 팝업
+        if d(text="Clear watch history").exists: d(text="Clear watch history").click()
         
-    # 5. Clear search history
     if d(textContains="Clear search history").exists:
         d(textContains="Clear search history").click()
         time.sleep(1)
-        if d(text="Clear search history").exists: d(text="Clear search history").click() # 확인 팝업
+        if d(text="Clear search history").exists: d(text="Clear search history").click()
         
-    print("   ✅ 기록 삭제 완료 (신뢰도 유지)")
+    print("   ✅ 기록 삭제 완료")
     
-    # 홈으로 복귀
     d.press("back"); time.sleep(0.5)
     d.press("back"); time.sleep(0.5)
     d.press("back"); time.sleep(0.5)
@@ -165,7 +154,6 @@ def manual_clear_history(d):
 # ==========================================
 def setup_youtube_persistent(d):
     print("   🚀 유튜브 최초 실행 (데이터 유지 모드)...")
-    # 처음 딱 한 번만 클리어 (깨끗한 시작)
     d.shell("pm clear com.google.android.youtube") 
     time.sleep(3)
     inject_fixed_ad_id(d)
@@ -175,7 +163,7 @@ def setup_youtube_persistent(d):
     nuke_popups(d)
 
 # ==========================================
-# [3단계] 검색 및 분석
+# [3단계] 검색 및 분석 (한글 입력 수정)
 # ==========================================
 def perform_search_and_analyze(d, keyword, worksheet, count, app_ver):
     print(f"\n🔎 [{count}] '{keyword}' 검색 시작...")
@@ -189,25 +177,35 @@ def perform_search_and_analyze(d, keyword, worksheet, count, app_ver):
         
     nuke_popups(d)
     
-    # 2. 텍스트 입력
+    # 2. ★ 검색창 포커스 & 한글 입력 (set_text 사용)
     search_box = d(resourceId="com.google.android.youtube:id/search_edit_text")
     if search_box.exists:
-        search_box.click() 
+        search_box.click() # 포커스
         time.sleep(1)
-        # 기존 내용 삭제 (혹시 남아있다면)
+        
+        # 기존 내용 삭제
         if d(resourceId="com.google.android.youtube:id/search_clear_button").exists:
             d(resourceId="com.google.android.youtube:id/search_clear_button").click()
         else:
             search_box.clear_text()
+        
+        time.sleep(1)
+        
+        # ★ 한글 입력은 set_text가 필수 (adb shell input은 영어만 됨)
+        print(f"   ⌨️ '{keyword}' 입력 (set_text)...")
+        search_box.set_text(keyword) 
+    else:
+        # 비상시 ADB (영어일 경우 대비)
+        print("   ⚠️ 검색창 못 찾음 -> ADB 입력 시도")
+        d.shell(f"input text '{keyword}'")
     
-    time.sleep(1)
-    print(f"   ⌨️ '{keyword}' 입력...")
-    d.shell(f"input text '{keyword}'")
     time.sleep(2)
     
-    # 3. 엔터
+    # 3. 엔터 (검색 실행)
     print("   🚀 검색 실행...")
-    d.shell("input keyevent 66") 
+    d.press("enter") # UI 엔터
+    time.sleep(1)
+    d.shell("input keyevent 66") # 시스템 엔터 (확인 사살)
     
     print("   ⏳ 광고 로딩 대기 (10초)...")
     time.sleep(10)
@@ -218,6 +216,7 @@ def perform_search_and_analyze(d, keyword, worksheet, count, app_ver):
     d.swipe(0.5, 0.3, 0.5, 0.8, 0.3) # 맨 위로
     time.sleep(2)
     
+    # 5. 결과 분석
     screen_text = read_screen_text(d, filename=f"{keyword}_{count}.png")
     
     is_ad = "X"
@@ -245,11 +244,9 @@ def perform_search_and_analyze(d, keyword, worksheet, count, app_ver):
     }
     append_to_sheet(worksheet, data)
     
-    # 5. 뒤로가기 후 기록 삭제 (다음 검색 준비)
+    # 6. 다음 검색 준비 (기록 삭제)
     d.press("back") 
     time.sleep(1)
-    
-    # ★ 여기서 기록 삭제 실행
     manual_clear_history(d)
 
 def run_android_monitoring():
@@ -260,7 +257,7 @@ def run_android_monitoring():
         d = u2.connect(ADB_ADDR)
         
         app_ver = check_youtube_version(d)
-        setup_youtube_persistent(d) # 최초 1회만 실행
+        setup_youtube_persistent(d) 
 
         for keyword in KEYWORDS:
             for i in range(1, REPEAT_COUNT + 1):
