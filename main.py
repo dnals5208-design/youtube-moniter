@@ -1,4 +1,3 @@
-# [Code B + Version Check]
 import time
 import uiautomator2 as u2
 import os
@@ -14,33 +13,28 @@ from PIL import Image
 # [설정]
 # ==========================================
 ADB_ADDR = "emulator-5554" 
-# ★ [제안] 브랜드명(해커스) 대신 경쟁이 치열한 '일반 키워드'로 테스트 해보세요.
 KEYWORDS = ["해커스"] 
 REPEAT_COUNT = 10 
 SCREENSHOT_DIR = "screenshots"
+# 고정 광고 ID (유지)
 FIXED_AD_ID = "38400000-8cf0-11bd-b23e-10b96e4ef00d" 
 
-# ... (classify_advertiser, get_worksheet, append_to_sheet, read_screen_text, nuke_popups 함수는 기존과 동일) ...
-# (위의 Code B에 있는 함수들을 그대로 사용하세요. 지면 관계상 생략하지 않고 아래에 붙여넣으시면 됩니다.)
-
+# ==========================================
+# [함수] 광고주 분류
+# ==========================================
 def classify_advertiser(text):
     clean_text = text.replace(" ", "")
     if "해커스" not in clean_text and "Hackers" not in clean_text:
         if any(x in clean_text for x in ["에듀윌", "공단기", "메가", "박문각", "YBM", "파고다", "영단기", "시원스쿨", "야나두"]):
             return "경쟁사", text[:30]
         return "타사", text[:30]
-
     if "공무원" in clean_text: return "해커스공무원", "해커스"
     if "경찰" in clean_text: return "해커스경찰", "해커스"
-    if "소방" in clean_text: return "해커스소방", "해커스"
-    if "자격증" in clean_text or "기사" in clean_text: return "해커스자격증", "해커스"
-    if "공인중개사" in clean_text or "주택" in clean_text: return "해커스공인중개사", "해커스"
-    if "금융" in clean_text: return "해커스금융", "해커스"
-    if "잡" in clean_text or "취업" in clean_text or "면접" in clean_text: return "해커스잡", "해커스"
-    if "편입" in clean_text: return "해커스편입", "해커스"
-    if "어학" in clean_text or "토익" in clean_text or "텝스" in clean_text or "토스" in clean_text or "오픽" in clean_text: return "해커스어학", "해커스"
     return "해커스(기타)", "해커스"
 
+# ==========================================
+# [기능] 구글 시트
+# ==========================================
 def get_worksheet():
     try:
         json_key = json.loads(os.environ['G_SHEET_KEY'])
@@ -95,104 +89,116 @@ def nuke_popups(d):
         if d(textContains="No thanks").exists: d(textContains="No thanks").click()
         if d(textContains="better keyboard").exists: d(textContains="No").click()
         if d(text="Skip trial").exists: d(text="Skip trial").click()
-        if d(textContains="Pause").exists and d(textContains="history").exists: d(text="Pause").click()
+        # 주의: 이번엔 '기록 중지' 팝업 처리를 뺍니다 (기록 켤 거니까)
     except: pass
 
-def check_ip_browser(d):
-    print("🌐 IP 확인 시작...")
-    d.shell("am force-stop com.android.chrome")
-    d.app_start("com.android.chrome", stop=True)
-    time.sleep(5)
-    nuke_popups(d)
-    d.shell('am start -a android.intent.action.VIEW -d "https://ipinfo.io/json" -p com.android.chrome')
-    time.sleep(15)
-    nuke_popups(d)
-    read_screen_text(d, filename="DEBUG_1_IP.png")
-
 def inject_fixed_ad_id(d):
-    print(f"   💉 고정 Advertising ID 주입 중: {FIXED_AD_ID}")
+    print(f"   💉 고정 Advertising ID 주입: {FIXED_AD_ID}")
     d.shell(f"settings put global google_ad_id {FIXED_AD_ID}")
     d.shell("settings put global ad_id_enabled 1")
     d.shell("settings put secure limit_ad_tracking 0")
 
-# ==========================================
-# [기능] 유튜브 버전 확인 (NEW)
-# ==========================================
 def check_youtube_version(d):
     try:
-        # 패키지 정보에서 versionString 추출
-        version_info = d.shell("dumpsys package com.google.android.youtube | grep versionName").output
-        print(f"   ℹ️ 설치된 유튜브 버전: {version_info.strip()}")
-        return version_info.strip().split("=")[1]
+        # ★ 버전 확인 로그를 가장 먼저 찍습니다.
+        version_output = d.shell("dumpsys package com.google.android.youtube | grep versionName").output.strip()
+        print(f"\n   📱 [앱정보] YouTube Version: {version_output}")
+        if "=" in version_output:
+            return version_output.split("=")[1]
+        return version_output
     except:
         return "Unknown"
 
-def setup_youtube_no_history(d):
-    print("   🧹 유튜브 앱 데이터 초기화 (워크플로우 시작 시 1회)...")
+# ==========================================
+# [기능] 인간 행동 모방 (빌드업)
+# ==========================================
+def human_warmup_routine(d):
+    print("\n   🙋‍♂️ [빌드업] 실제 사람인 척 연기 중... (광고 활성화 유도)")
+    
+    # 1. 일반적인 인기 키워드 검색
+    warmup_keyword = "뉴스"
+    print(f"   📺 '{warmup_keyword}' 검색 및 시청 시도...")
+    
+    d(description="Search").click()
+    time.sleep(1)
+    d.shell(f"input text '{warmup_keyword}'")
+    time.sleep(1)
+    d.shell("input keyevent 66") # Enter
+    time.sleep(5)
+    
+    # 2. 첫 번째 영상 클릭 및 시청
+    # 화면 중앙쯤을 클릭해서 영상 진입
+    d.click(0.5, 0.4) 
+    print("   👀 영상 시청 중 (15초)...")
+    time.sleep(15)
+    
+    # 3. 홈으로 복귀하지 않고 바로 검색창 누름 (연이은 검색 패턴)
+    print("   🕵️ 이제 진짜 타겟 키워드 검색 준비...")
+    d.press("search") # 검색 버튼
+    time.sleep(2)
+    # 기존 검색어 지우기 (X버튼)
+    if d(resourceId="com.google.android.youtube:id/search_clear_button").exists:
+        d(resourceId="com.google.android.youtube:id/search_clear_button").click()
+    time.sleep(1)
+
+# ==========================================
+# [설정] 유튜브 실행 (기록 켜둠!)
+# ==========================================
+def setup_youtube_persistent(d):
+    print("   🧹 유튜브 앱 데이터 초기화...")
     d.shell("pm clear com.google.android.youtube")
     time.sleep(3)
     inject_fixed_ad_id(d)
     
     print("   🔨 유튜브 실행...")
     d.shell("am start -n com.google.android.youtube/com.google.android.apps.youtube.app.WatchWhileActivity")
-    time.sleep(12)
+    time.sleep(10)
     nuke_popups(d)
     
-    print("   ⚙️ [설정] 기록 일시 중지 적용 중...")
-    d.click(0.92, 0.05)
-    time.sleep(2)
-    if d(text="Settings").exists: d(text="Settings").click()
-    else:
-        d.swipe(0.5, 0.8, 0.5, 0.2)
-        if d(text="Settings").exists: d(text="Settings").click()
-    time.sleep(2)
-    
-    if d(textContains="History").exists: d(textContains="History").click()
-    time.sleep(2)
-    
-    if d(textContains="Pause watch history").exists:
-        d(textContains="Pause watch history").click()
-        time.sleep(1)
-        if d(text="Pause").exists: d(text="Pause").click()
-        
-    if d(textContains="Pause search history").exists:
-        d(textContains="Pause search history").click()
-        time.sleep(1)
-        if d(text="Pause").exists: d(text="Pause").click()
-        
-    print("   ✅ 기록 일시 중지 완료")
-    d.press("back"); time.sleep(1); d.press("back"); time.sleep(1)
-    if d(description="Home").exists: d(description="Home").click()
+    # ★ 중요: 이번에는 '설정'에 들어가서 기록을 끄지 않습니다.
+    # 기록이 쌓여야 구글이 봇이 아니라고 판단합니다.
+    print("   ✅ 기록 누적 모드 ON (설정 변경 안 함)")
 
 def perform_search_and_analyze(d, keyword, worksheet, count, app_ver):
-    print(f"\n🔎 [{count}] '{keyword}' 검색 시작...")
-    if d(description="Search").exists: d(description="Search").click()
-    elif d(resourceId="com.google.android.youtube:id/menu_item_search").exists: d(resourceId="com.google.android.youtube:id/menu_item_search").click()
-    else: d.click(0.85, 0.05)
-    time.sleep(2)
-    nuke_popups(d)
+    print(f"\n🔎 [{count}] '{keyword}' 타겟 검색 시작...")
     
-    search_box = d(resourceId="com.google.android.youtube:id/search_edit_text")
-    if search_box.exists:
+    # 검색창 진입 (이미 웜업 단계에서 검색창에 있을 수 있음)
+    if not d(resourceId="com.google.android.youtube:id/search_edit_text").exists:
+         if d(description="Search").exists: d(description="Search").click()
+         elif d(resourceId="com.google.android.youtube:id/menu_item_search").exists: d(resourceId="com.google.android.youtube:id/menu_item_search").click()
+         else: d.click(0.85, 0.05)
+         time.sleep(2)
+
+    # 기존 텍스트 지우기
+    if d(resourceId="com.google.android.youtube:id/search_edit_text").exists:
         if d(resourceId="com.google.android.youtube:id/search_clear_button").exists:
             d(resourceId="com.google.android.youtube:id/search_clear_button").click()
-        else: search_box.clear_text()
-    time.sleep(1)
+        else:
+            d(resourceId="com.google.android.youtube:id/search_edit_text").clear_text()
     
+    time.sleep(1)
     print(f"   ⌨️ '{keyword}' 입력...")
-    if search_box.exists: search_box.set_text(keyword)
-    else: d.shell(f"input text '{keyword}'")
+    d.shell(f"input text '{keyword}'")
     time.sleep(2)
     
-    print("   🚀 검색 실행 (시스템 엔터)...")
+    print("   🚀 검색 실행...")
     d.shell("input keyevent 66") 
-    time.sleep(8)
+    
+    print("   ⏳ 광고 로딩 대기 (10초)...")
+    time.sleep(10)
+    
+    # 화면 정리
+    d.press("back") # 키보드 내리기
+    time.sleep(1)
+    d.swipe(0.5, 0.3, 0.5, 0.8, 0.3) # 맨 위로
+    time.sleep(2)
     
     screen_text = read_screen_text(d, filename=f"{keyword}_{count}.png")
+    
     is_ad = "X"
     ad_corp, ad_detail, ad_type, ad_title = "-", "-", "-", "-"
     
-    if "Ad" in screen_text or "광고" in screen_text or "Sponsored" in screen_text:
+    if any(x in screen_text for x in ["Ad", "Sponsored", "광고", "Promoted"]):
         is_ad = "O"
         if "조회수" in screen_text or "views" in screen_text: ad_type = "영상광고"
         else: ad_type = "배너/검색광고"
@@ -210,33 +216,41 @@ def perform_search_and_analyze(d, keyword, worksheet, count, app_ver):
         "키워드": keyword, "회차": count, "광고여부": is_ad,
         "광고주_구분": ad_corp, "상세_광고주": ad_detail,
         "광고형태": ad_type, "제목/텍스트": ad_title,
-        "앱버전": app_ver # 버전 정보 추가
+        "앱버전": app_ver
     }
     append_to_sheet(worksheet, data)
     
-    if d(resourceId="com.google.android.youtube:id/search_clear_button").exists: d.press("back") 
-    d.press("back")
-    time.sleep(2)
+    # 다음 검색을 위해 홈으로 가지 않고 그냥 뒤로가기만 해서 목록 유지
+    # (연속 검색 느낌)
+    d.press("back") 
 
 def run_android_monitoring():
     ws = get_worksheet()
-    print(f"📱 [MO] 모니터링 시작 (기록중지 모드)...")
+    print(f"📱 [MO] 모니터링 시작 (Human Simulation Mode)...")
     try:
         os.system("adb wait-for-device")
         d = u2.connect(ADB_ADDR)
-        check_ip_browser(d)
         
-        # 앱 버전 체크
+        # 1. 버전 체크 (로그 최상단 확인용)
         app_ver = check_youtube_version(d)
         
-        setup_youtube_no_history(d)
+        # 2. 초기화 (기록 중지 X)
+        setup_youtube_persistent(d)
+        
+        # 3. ★ 웜업: 뉴스 영상 하나 보고 오기 (IP 신뢰도 상승 목적)
+        human_warmup_routine(d)
+
+        # 4. 본 검색 시작
         for keyword in KEYWORDS:
             for i in range(1, REPEAT_COUNT + 1):
+                # 앱 죽었으면 살리기
                 if d.app_current()['package'] != "com.google.android.youtube":
                     d.shell("am start -n com.google.android.youtube/com.google.android.apps.youtube.app.WatchWhileActivity")
                     time.sleep(5)
+                
                 nuke_popups(d)
                 perform_search_and_analyze(d, keyword, ws, i, app_ver)
+                
     except Exception as e:
         print(f"에러 발생: {e}")
 
